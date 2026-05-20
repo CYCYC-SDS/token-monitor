@@ -54,11 +54,9 @@ Token Monitor reads usage from these AI coding tools out of the box:
 | <img src=".github/assets/tools-icon/openclaw.png" width="28" alt="OpenClaw" /> | OpenClaw | `~/.openclaw/agents/` |
 | <img src=".github/assets/tools-icon/cursor.png" width="28" alt="Cursor" /> | Cursor | `~/.config/tokscale/cursor-cache/` (populated by `tokscale cursor pull`) |
 
-Detection and parsing are handled by [tokscale](https://github.com/junhoyeo/tokscale).
-
 ## Installation
 
-### 1. Single device — Local mode
+### Local mode — single device
 
 The default. No hub, no agent, no config.
 
@@ -69,26 +67,24 @@ npm start
 
 Usage is read live from your local AI client directories — see the [Supported Tools](#supported-tools) table for the full list of paths. The widget updates the moment those files change, with a 5-minute fallback poll.
 
-### 2. Multiple devices on your network — Self-hosted hub
+### Multi-device sync
 
-Run the hub once on a machine that stays on, then open the widget on each device and point it at the hub.
+Pick ONE hub backend that all your devices (and any headless agents) connect to. On each device, open the widget and fill in Settings → Multi-device Sync → Hub URL + Secret. The widget contributes this device's usage automatically; run `npm run agent` only on machines without a widget.
+
+See [docs/API.md](docs/API.md) for the hub HTTP API reference.
+
+#### Option A — Self-hosted Node hub (same LAN)
+
+Run the hub once on a machine that stays on, then point each device at it.
 
 ```bash
 # on the always-on machine
 cp .env.example .env
 # set TOKEN_MONITOR_SECRET to something private, then:
 npm run hub
-
-# on every device that should contribute or display usage
-npm start
-# Settings → Multi-device Sync → fill in Hub URL + Secret, Save
 ```
 
-When sync mode is active the widget contributes this device's usage automatically. Run `npm run agent` only if you want a headless agent on a machine without a widget.
-
-See [docs/API.md](docs/API.md) for the hub HTTP API reference.
-
-### 3. Across networks, including iPhone — Cloudflare Worker hub
+#### Option B — Cloudflare Worker hub (across networks, including iPhone)
 
 A Worker-based deployment that speaks the same protocol as the Node hub.
 Public HTTPS, no always-on machine, free tier covers small-team usage,
@@ -106,10 +102,7 @@ npx wrangler secret put TOKEN_MONITOR_SECRET
 npx wrangler deploy
 ```
 
-Wrangler prints the deployed URL — paste it into each device's widget at Settings → Multi-device Sync. The widget contributes usage automatically; a standalone agent is only needed on machines without a widget.
-
-See [worker/README.md](worker/README.md) for full deploy notes, the iOS widget
-recipe, and endpoint reference.
+Wrangler prints the deployed URL — paste it into each device's widget at Settings → Multi-device Sync. See [worker/README.md](worker/README.md) for full deploy notes, the iOS widget recipe, and endpoint reference.
 
 ## How it works
 
