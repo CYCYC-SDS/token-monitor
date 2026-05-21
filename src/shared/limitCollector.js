@@ -24,7 +24,9 @@ function parseBoolean(value, fallback = true) {
 }
 
 function parseLimitProviders(value) {
-  const source = value === undefined || value === null ? 'claude,codex' : value;
+  const isEmpty = value === undefined || value === null || value === ''
+    || (Array.isArray(value) && value.length === 0);
+  const source = isEmpty ? 'claude,codex' : value;
   const raw = Array.isArray(source) ? source : String(source).split(',');
   const seen = new Set();
   const providers = [];
