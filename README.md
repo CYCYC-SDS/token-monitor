@@ -147,19 +147,13 @@ TOKEN_MONITOR_HUB_URL=               # required for sync mode — Worker URL or 
 TOKEN_MONITOR_SECRET=                # shared secret, must match the hub
 TOKEN_MONITOR_DEVICE_ID=             # optional — defaults to hostname
 TOKEN_MONITOR_CLIENTS=               # optional — defaults to all supported tools
+TOKEN_MONITOR_LIMITS_ENABLED=        # optional — defaults to enabled; set to 0 to skip CLI probing
+TOKEN_MONITOR_LIMIT_PROVIDERS=       # optional — defaults to all supported (claude, codex)
 ```
 
 The widget reads the same env vars as first-run defaults, then takes over with its own GUI-managed settings.
 
-Every value can also be passed as a CLI flag (`--hub=`, `--secret=`, `--device=`, `--clients=`) — flags win over env. Less-common knobs (`TOKEN_MONITOR_INTERVAL_MS`, `TOKEN_MONITOR_PORT`, `TOKEN_MONITOR_STALE_AFTER_MS`, …) are also accepted via env / flag but kept out of `.env.example` to reduce noise.
-
-AI Tool Limits knobs for headless agents:
-
-- `TOKEN_MONITOR_LIMITS_ENABLED=0` disables limit detection
-- `TOKEN_MONITOR_LIMIT_PROVIDERS=claude,codex` selects providers
-- `TOKEN_MONITOR_LIMITS_REFRESH_MS=300000` selects refresh frequency
-
-Equivalent CLI flags are `--limits=false`, `--limitProviders=claude,codex`, and `--limitsRefreshMs=300000`.
+Every value can also be passed as a CLI flag (`--hub=`, `--secret=`, `--device=`, `--clients=`, `--limits=`, `--limitProviders=`) — flags win over env. Less-common knobs (`TOKEN_MONITOR_INTERVAL_MS`, `TOKEN_MONITOR_PORT`, `TOKEN_MONITOR_STALE_AFTER_MS`, `TOKEN_MONITOR_LIMITS_REFRESH_MS`, …) are also accepted via env / flag but kept out of `.env.example` to reduce noise.
 
 Example one-off run:
 
