@@ -408,17 +408,42 @@ function callClaudeUsage(accessToken, deps = {}) {
   }, deps);
 }
 
+async function delegatedClaudeRefresh(currentCredentials, deps = {}) {
+  // Spawn `claude /status` in a PTY and let Claude Code itself refresh the token.
+  // Matches CodexBar's strategy — Claude Code is a native Anthropic application,
+  // so OAuth credential use stays within sanctioned channels. Best-effort: if the
+  // probe fails we still re-read in case Claude Code touched the credentials.
+  await touchClaudeAuthPath(deps).catch(() => null);
+  const fresh = await readClaudeCredentials(deps);
+  if (!fresh.accessToken || fresh.accessToken === currentCredentials.accessToken) {
+    throw errorWithStatus('unauthorized', 'Claude Code did not refresh the OAuth token');
+  }
+  return fresh;
+}
+
+async function refreshClaudeCredentials(currentCredentials, deps = {}) {
+  const platform = deps.platform || process.platform;
+  if (platform === 'darwin') return delegatedClaudeRefresh(currentCredentials, deps);
+  if (!currentCredentials.refreshToken) {
+    throw errorWithStatus('unauthorized', 'No refresh token available');
+  }
+  const refreshed = await refreshClaudeAccessToken(currentCredentials.refreshToken, deps);
+  await persistClaudeRefresh(currentCredentials, refreshed, deps);
+  return { ...currentCredentials, ...refreshed };
+}
+
 async function fetchClaudeLimits(options = {}, deps = {}) {
   const nowMs = (deps.now || Date.now)();
+  const platform = deps.platform || process.platform;
   try {
     let credentials = await readClaudeCredentials(deps);
 
-    if (credentials.refreshToken && credentials.expiresAt
+    // Proactive refresh only on non-darwin: mac uses delegated (spawning Claude Code)
+    // which is expensive; CodexBar's design likewise refreshes reactively, not on expiry.
+    if (platform !== 'darwin' && credentials.refreshToken && credentials.expiresAt
       && credentials.expiresAt - nowMs < CLAUDE_REFRESH_LEEWAY_MS) {
       try {
-        const refreshed = await refreshClaudeAccessToken(credentials.refreshToken, deps);
-        await persistClaudeRefresh(credentials, refreshed, deps);
-        credentials = { ...credentials, ...refreshed };
+        credentials = await refreshClaudeCredentials(credentials, deps);
       } catch (_) { /* fall through; reactive retry below may still succeed */ }
     }
 
@@ -426,10 +451,8 @@ async function fetchClaudeLimits(options = {}, deps = {}) {
     try {
       usage = await callClaudeUsage(credentials.accessToken, deps);
     } catch (error) {
-      if (error?.status !== 'unauthorized' || !credentials.refreshToken) throw error;
-      const refreshed = await refreshClaudeAccessToken(credentials.refreshToken, deps);
-      await persistClaudeRefresh(credentials, refreshed, deps);
-      credentials = { ...credentials, ...refreshed };
+      if (error?.status !== 'unauthorized') throw error;
+      credentials = await refreshClaudeCredentials(credentials, deps);
       usage = await callClaudeUsage(credentials.accessToken, deps);
     }
 
@@ -621,6 +644,9 @@ import fcntl, os, pty, re, select, signal, subprocess, sys, time
 cmd = os.environ.get("TOKEN_MONITOR_CLAUDE_COMMAND_PATH", "claude")
 cwd = os.environ.get("TOKEN_MONITOR_CLAUDE_PROBE_DIR") or os.getcwd()
 timeout = float(os.environ.get("TOKEN_MONITOR_CLAUDE_CLI_TIMEOUT", "35"))
+slash_command = os.environ.get("TOKEN_MONITOR_CLAUDE_SLASH_COMMAND", "/usage")
+exit_marker = os.environ.get("TOKEN_MONITOR_CLAUDE_EXIT_MARKER_REGEX", "currentsession.*?[0-9]{1,3}(?:\\\\.[0-9]+)?%")
+exit_pattern = re.compile(exit_marker) if exit_marker else None
 os.makedirs(os.path.join(cwd, ".claude"), exist_ok=True)
 settings_path = os.path.join(cwd, ".claude", "settings.local.json")
 if not os.path.exists(settings_path):
@@ -636,7 +662,8 @@ def compact(data):
 buf = b""
 start = time.time()
 last_enter = 0
-sent_usage = False
+sent_cmd = False
+slash_bytes = (slash_command + "\\r").encode("utf-8")
 try:
     while time.time() - start < timeout:
         readable, _, _ = select.select([master], [], [], 0.08)
@@ -655,13 +682,13 @@ try:
         ]):
             os.write(master, b"\\r")
             last_enter = now
-        if not sent_usage and now - start > 5:
-            os.write(master, b"/usage\\r")
-            sent_usage = True
-        if sent_usage and now - last_enter > 0.8:
+        if not sent_cmd and now - start > 5:
+            os.write(master, slash_bytes)
+            sent_cmd = True
+        if sent_cmd and now - last_enter > 0.8:
             os.write(master, b"\\r")
             last_enter = now
-        if sent_usage and "currentsession" in scan and re.search(r"currentsession.*?[0-9]{1,3}(?:\\.[0-9]+)?%", scan):
+        if sent_cmd and exit_pattern is not None and exit_pattern.search(scan):
             time.sleep(2)
             break
     sys.stdout.buffer.write(buf)
@@ -677,10 +704,9 @@ finally:
 `.trim();
 }
 
-async function runClaudeUsageCli(deps = {}) {
-  if (deps.runClaudeUsageCli) return deps.runClaudeUsageCli();
+async function runClaudePtyProbe(slashCommand, exitMarkerRegex, deps = {}) {
   if ((deps.platform || process.platform) === 'win32') {
-    throw errorWithStatus('unavailable', 'Claude CLI PTY fallback is not available on Windows yet');
+    throw errorWithStatus('unavailable', 'Claude CLI PTY probe is not available on Windows yet');
   }
   const env = deps.env || process.env;
   const command = claudeCommandCandidates(env)[0];
@@ -690,7 +716,9 @@ async function runClaudeUsageCli(deps = {}) {
     ...env,
     TOKEN_MONITOR_CLAUDE_COMMAND_PATH: command,
     TOKEN_MONITOR_CLAUDE_PROBE_DIR: probeDir,
-    TOKEN_MONITOR_CLAUDE_CLI_TIMEOUT: String(deps.claudeCliTimeoutSeconds || 35)
+    TOKEN_MONITOR_CLAUDE_CLI_TIMEOUT: String(deps.claudeCliTimeoutSeconds || 35),
+    TOKEN_MONITOR_CLAUDE_SLASH_COMMAND: slashCommand,
+    TOKEN_MONITOR_CLAUDE_EXIT_MARKER_REGEX: exitMarkerRegex || ''
   };
   const pythonCandidates = deps.pythonCommand ? [deps.pythonCommand] : ['python3', 'python'];
   let lastError = null;
@@ -708,6 +736,24 @@ async function runClaudeUsageCli(deps = {}) {
     }
   }
   throw lastError || errorWithStatus('unavailable', 'Python PTY runner unavailable');
+}
+
+async function runClaudeUsageCli(deps = {}) {
+  if (deps.runClaudeUsageCli) return deps.runClaudeUsageCli();
+  return runClaudePtyProbe('/usage', 'currentsession.*?[0-9]{1,3}(?:\\.[0-9]+)?%', deps);
+}
+
+async function touchClaudeAuthPath(deps = {}) {
+  if (deps.touchClaudeAuthPath) return deps.touchClaudeAuthPath();
+  // Spawn `claude /status` in PTY to let Claude Code itself perform an auth check
+  // and refresh the OAuth token if needed. We don't parse output — the side-effect
+  // (mutated credentials file / Keychain entry) is the signal. Permissive exit
+  // marker matches common /status output tokens so we exit promptly on success.
+  return runClaudePtyProbe('/status', '(?:loggedin|subscription|account|model|version|email|organization)', {
+    ...deps,
+    claudeCliTimeoutSeconds: deps.claudeStatusTimeoutSeconds || 20,
+    claudeCliTimeoutMs: deps.claudeStatusTimeoutMs || 25000
+  });
 }
 
 function codexWindowKind(name, window) {
@@ -1058,6 +1104,9 @@ module.exports = {
   parseLimitProviders,
   normalizeLimitsRefreshMs,
   refreshClaudeAccessToken,
+  refreshClaudeCredentials,
+  delegatedClaudeRefresh,
+  touchClaudeAuthPath,
   rankClaudeCredentialFiles,
   wslClaudeCredentialPaths
 };
