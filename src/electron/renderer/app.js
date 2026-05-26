@@ -97,6 +97,7 @@ Object.assign(els, {
   resetTokscaleButton: document.getElementById('resetTokscaleButton'),
   openTokscaleLinkButton: document.getElementById('openTokscaleLinkButton'),
   appUpdatePill: document.getElementById('appUpdatePill'),
+  appUpdatePillAction: document.getElementById('appUpdatePillAction'),
   appUpdatePillLabel: document.getElementById('appUpdatePillLabel'),
   appUpdatePillDismiss: document.getElementById('appUpdatePillDismiss'),
   appUpdateInstalled: document.getElementById('appUpdateInstalled'),
@@ -147,13 +148,11 @@ function renderAppUpdatePill() {
   if (!pill) return;
   if (!s || !s.hasUpdate || !s.latest) {
     pill.classList.add('hidden');
-    pill.removeAttribute('href');
     pill.setAttribute('title', '');
     els.appUpdatePillLabel.textContent = '';
     return;
   }
   pill.classList.remove('hidden');
-  pill.href = s.latest.htmlUrl;
   pill.setAttribute('title', s.latest.name || `v${s.latest.version}`);
   els.appUpdatePillLabel.textContent = `↑ v${s.latest.version}`;
 }
@@ -1078,16 +1077,13 @@ els.refreshButton.addEventListener('click', refreshStats);
 els.minButton.addEventListener('click', () => window.tokenMonitor.minimize());
 els.closeButton.addEventListener('click', () => window.tokenMonitor.close());
 
-els.appUpdatePill.addEventListener('click', async (event) => {
-  event.preventDefault();
+els.appUpdatePillAction.addEventListener('click', async () => {
   const latest = state.appUpdate?.latest;
   if (!latest?.htmlUrl) return;
   await window.tokenMonitor.openExternal(latest.htmlUrl);
 });
 
-els.appUpdatePillDismiss.addEventListener('click', async (event) => {
-  event.preventDefault();
-  event.stopPropagation();
+els.appUpdatePillDismiss.addEventListener('click', async () => {
   const version = state.appUpdate?.latest?.version;
   if (!version) return;
   state.appUpdate = await window.tokenMonitor.dismissAppUpdate(version);

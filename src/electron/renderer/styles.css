@@ -668,21 +668,31 @@ input, textarea, [contenteditable="true"] {
 .update-pill {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 3px 6px 3px 8px;
+  gap: 0;
+  padding: 0;
   border-radius: 999px;
   background: rgba(115, 189, 245, 0.12);
   border: 1px solid rgba(115, 189, 245, 0.32);
   color: var(--blue);
   font-size: 10px;
   line-height: 1;
-  text-decoration: none;
   white-space: nowrap;
-  cursor: pointer;
   transition: background-color 120ms ease, border-color 120ms ease;
 }
 .update-pill.hidden { display: none; }
 .update-pill:hover { background: rgba(115, 189, 245, 0.18); border-color: rgba(115, 189, 245, 0.52); }
+.update-pill-action {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  display: inline-flex;
+  align-items: center;
+  font: inherit;
+  line-height: 1;
+  padding: 3px 4px 3px 8px;
+  cursor: pointer;
+}
 .update-pill-label { letter-spacing: 0.02em; }
 .update-pill-dismiss {
   appearance: none;
@@ -694,6 +704,7 @@ input, textarea, [contenteditable="true"] {
   line-height: 1;
   width: 14px;
   height: 14px;
+  margin-right: 6px;
   padding: 0;
   cursor: pointer;
 }

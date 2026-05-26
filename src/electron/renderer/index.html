@@ -171,10 +171,12 @@
       <section id="limitsPanel" class="limits-panel hidden"></section>
       <footer class="footer">
         <button id="breakdownToggle" class="mode-button">0 devices</button>
-        <a id="appUpdatePill" class="update-pill hidden" href="#" title="">
-          <span id="appUpdatePillLabel" class="update-pill-label"></span>
-          <button id="appUpdatePillDismiss" class="update-pill-dismiss" type="button" title="Dismiss this version" aria-label="Dismiss this version">×</button>
-        </a>
+        <div id="appUpdatePill" class="update-pill hidden" title="">
+          <button id="appUpdatePillAction" type="button" class="update-pill-action">
+            <span id="appUpdatePillLabel" class="update-pill-label"></span>
+          </button>
+          <button id="appUpdatePillDismiss" type="button" class="update-pill-dismiss" title="Dismiss this version" aria-label="Dismiss this version">×</button>
+        </div>
         <button id="refreshButton" class="refresh-button" title="Refresh">↻</button>
       </footer>
     </main>
