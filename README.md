@@ -40,7 +40,8 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 
 - **Live token tracking** for Claude Code, Codex, Hermes, OpenCode, OpenClaw, Cursor, and Antigravity (UI updates within seconds of each turn)
 - **Real-time multi-device sync** over Server-Sent Events
-- **Breakdown views** grouped by tool, device, model, or account limits
+- **Breakdown views** grouped by tool, device, model, session, or account limits
+- **Per-session detail** — open a Claude Code or Codex session to see tokens per prompt, expandable to each reply's exact token split and tools used (read on-demand from local transcripts, never synced)
 - **Cost breakdown** alongside token counts
 - **AI Tool Limits detection** for Claude Code, Codex, Cursor, and Antigravity with session, weekly, billing, and credits windows
 - **Appearance controls** for glass opacity, blur, and transparent window mode

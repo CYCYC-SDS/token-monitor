@@ -40,7 +40,8 @@
 
 - **实时 Token 追踪**：覆盖 Claude Code、Codex、Hermes、OpenCode、OpenClaw、Cursor、Antigravity（每轮对话后 UI 在数秒内刷新）
 - **多设备实时同步**：通过 Server-Sent Events 推送
-- **分组统计视图**：可按工具、设备、模型或账户用量上限分组
+- **分组统计视图**：可按工具、设备、模型、session 或账户用量上限分组
+- **单个 session 明细**：点进 Claude Code 或 Codex 的 session，可看每条提问的 Token 消耗，并展开查看每次回复的 Token 拆分与用到的工具（打开时才实时读取本机 transcript，绝不同步）
 - **成本分项**：Token 数量旁附带成本统计
 - **AI 工具用量上限检测**：支持 Claude Code、Codex、Cursor 与 Antigravity，涵盖 session、每周、账单与 credits 窗口
 - **外观控制**：玻璃透明度、模糊度、完全透明窗口
