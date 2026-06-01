@@ -11,6 +11,24 @@ function errorWithStatus(status, message) {
   return error;
 }
 
+function firstTrimmedString(...values) {
+  for (const value of values) {
+    const text = String(value || '').trim();
+    if (text) return text;
+  }
+  return null;
+}
+
+function preferredPlanInfoName(planInfo) {
+  return firstTrimmedString(
+    planInfo?.planDisplayName,
+    planInfo?.displayName,
+    planInfo?.productName,
+    planInfo?.planName,
+    planInfo?.planShortName
+  );
+}
+
 function isLanguageServerCommand(lowerCommand) {
   return /(^|[/\\])language_server(_macos|\.exe)?(\s|$)/.test(lowerCommand);
 }
@@ -304,8 +322,8 @@ async function probe(deps = {}) {
       if (data?.userStatus) {
         const configs = data.userStatus.cascadeModelConfigData?.clientModelConfigs;
         const accountPlan =
-          data.userStatus.userTier?.name?.trim?.()
-          || data.userStatus.planStatus?.planInfo?.planName?.trim?.()
+          firstTrimmedString(data.userStatus.userTier?.name)
+          || preferredPlanInfoName(data.userStatus.planStatus?.planInfo)
           || null;
         const accountEmail = data.userStatus.email?.trim?.() || null;
         const models = modelsFromConfigs(configs);

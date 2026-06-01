@@ -156,9 +156,35 @@ function uniqueStrings(values) {
   return out;
 }
 
+function displayPlanWord(word) {
+  const raw = String(word || '');
+  const lower = raw.toLowerCase();
+  if (['ai', 'api', 'cbp', 'gpt', 'k12'].includes(lower)) return lower.toUpperCase();
+  return raw.charAt(0).toUpperCase() + raw.slice(1);
+}
+
+function cleanPlanText(text, prefixes = ['claude', 'chatgpt', 'openai']) {
+  const raw = String(text || '').trim();
+  if (!raw || raw.includes('@')) return '';
+  const prefixPattern = prefixes.length > 0 ? new RegExp(`^(?:${prefixes.join('|')})[\\s_-]+`, 'i') : null;
+  let clean = raw;
+  while (prefixPattern && prefixPattern.test(clean)) clean = clean.replace(prefixPattern, '');
+  return clean
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function displayPlanText(raw, maxWords = 3) {
+  const words = String(raw || '').split(/\s+/).filter(Boolean);
+  const visible = Number.isFinite(maxWords) ? words.slice(0, maxWords) : words;
+  return visible.map(displayPlanWord).join(' ');
+}
+
 function planLabelFromParts(...parts) {
   const text = parts.map((part) => String(part || '')).find(Boolean) || '';
-  const raw = text.toLowerCase().replace(/^(claude|chatgpt|openai)[\s_-]+/, '').replace(/[_-]+/g, ' ').trim();
+  const raw = cleanPlanText(text);
   if (!raw || raw.includes('@')) return '';
   const aliases = {
     free: 'Free',
@@ -167,10 +193,62 @@ function planLabelFromParts(...parts) {
     max: 'Max',
     team: 'Team',
     teams: 'Team',
-    enterprise: 'Enterprise'
+    enterprise: 'Enterprise',
+    ultra: 'Ultra'
   };
   if (aliases[raw]) return aliases[raw];
-  return raw.split(/\s+/).slice(0, 3).map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+  return displayPlanText(raw);
+}
+
+function claudeRateLimitTierLabel(rateLimitTier) {
+  const raw = cleanPlanText(rateLimitTier, []);
+  if (!raw) return '';
+  const words = raw.split(/\s+/).filter((word) => !['default', 'claude', 'ai'].includes(word));
+  if (words.length === 0) return '';
+  return planLabelFromParts(words.join(' '));
+}
+
+function claudePlanLabelFromParts(subscriptionType, rateLimitTier) {
+  const subscriptionLabel = planLabelFromParts(subscriptionType);
+  const tierLabel = claudeRateLimitTierLabel(rateLimitTier);
+  if (subscriptionLabel === 'Max' && /^Max\s+(?:5x|20x)$/i.test(tierLabel)) return tierLabel;
+  return subscriptionLabel || tierLabel;
+}
+
+function codexPlanLabelFromParts(...parts) {
+  const text = parts.map((part) => String(part || '').trim()).find(Boolean) || '';
+  if (!text || text.includes('@')) return '';
+  const exact = {
+    pro: 'Pro 20x',
+    prolite: 'Pro 5x',
+    pro_lite: 'Pro 5x',
+    'pro-lite': 'Pro 5x',
+    'pro lite': 'Pro 5x'
+  };
+  const raw = text.toLowerCase();
+  if (exact[raw]) return exact[raw];
+  const cleaned = cleanPlanText(text, ['codex', 'chatgpt', 'openai']);
+  if (!cleaned) return '';
+  if (exact[cleaned]) return exact[cleaned];
+  const aliases = {
+    free: 'Free',
+    plus: 'Plus',
+    max: 'Max',
+    team: 'Team',
+    teams: 'Team',
+    enterprise: 'Enterprise',
+    'enterprise cbp usage based': 'Enterprise',
+    'self serve business usage based': 'Business'
+  };
+  if (aliases[cleaned]) return aliases[cleaned];
+  return displayPlanText(cleaned, Infinity);
+}
+
+function antigravityPlanLabelFromParts(...parts) {
+  const text = parts.map((part) => String(part || '').trim()).find(Boolean) || '';
+  const raw = cleanPlanText(text, ['google', 'ai']);
+  if (!raw) return '';
+  return planLabelFromParts(raw);
 }
 
 function extractClaudeOauth(credentials) {
@@ -204,7 +282,7 @@ async function readClaudeCredentials(deps = {}) {
           refreshToken: oauth.refreshToken ? String(oauth.refreshToken) : null,
           expiresAt: normalizeExpiresAt(oauth.expiresAt),
           identity: `path:${candidate.identityLabel}:${oauth.subscriptionType || ''}:${oauth.rateLimitTier || ''}`,
-          accountLabel: planLabelFromParts(oauth.subscriptionType, oauth.rateLimitTier)
+          accountLabel: claudePlanLabelFromParts(oauth.subscriptionType, oauth.rateLimitTier)
         };
       }
     } catch (error) {
@@ -223,7 +301,7 @@ async function readClaudeCredentials(deps = {}) {
           refreshToken: oauth.refreshToken ? String(oauth.refreshToken) : null,
           expiresAt: normalizeExpiresAt(oauth.expiresAt),
           identity: `keychain:Claude Code-credentials:${oauth.subscriptionType || ''}:${oauth.rateLimitTier || ''}`,
-          accountLabel: planLabelFromParts(oauth.subscriptionType, oauth.rateLimitTier)
+          accountLabel: claudePlanLabelFromParts(oauth.subscriptionType, oauth.rateLimitTier)
         };
       }
     }
@@ -775,7 +853,7 @@ function codexRateLimitSnapshot(payload = {}) {
 function codexAccountLabel(payload = {}) {
   const snapshot = codexRateLimitSnapshot(payload);
   const account = payload.account || {};
-  return planLabelFromParts(
+  return codexPlanLabelFromParts(
     snapshot.planType,
     snapshot.plan_type,
     account.planType,
@@ -1045,7 +1123,7 @@ async function fetchAntigravityLimits(options = {}, deps = {}) {
   const probeFn = deps.antigravityProbe || antigravityProbe.probe;
   try {
     const snapshot = await probeFn(deps);
-    const accountLabel = snapshot.accountPlan ? planLabelFromParts(snapshot.accountPlan) : '';
+    const accountLabel = snapshot.accountPlan ? antigravityPlanLabelFromParts(snapshot.accountPlan) : '';
     const accountKeySeed = snapshot.accountEmail || snapshot.accountPlan || 'default';
     const windows = (snapshot.pools || []).map((pool) => ({
       kind: 'weekly',

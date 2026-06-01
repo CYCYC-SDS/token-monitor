@@ -230,6 +230,41 @@ test('probe returns plan + 3 pools when GetUserStatus succeeds', async () => {
   assert.deepEqual(result.pools.map((p) => p.name), ['Gemini Pro', 'Gemini Flash', 'Claude']);
 });
 
+test('probe prefers userTier name and richer planInfo display fields', async () => {
+  const withUserTier = await probe.probe({
+    detectProcessInfo: async () => ({ pid: 1, csrfToken: 'csrf', extensionPort: null }),
+    listeningPorts: async () => [54733],
+    callLs: async () => ({
+      userStatus: {
+        userTier: { name: 'Google AI Ultra' },
+        planStatus: { planInfo: { planDisplayName: 'Google AI Pro', planName: 'Pro' } },
+        cascadeModelConfigData: {
+          clientModelConfigs: [
+            { label: 'Gemini 3 Pro', modelOrAlias: { model: 'MA' }, quotaInfo: { remainingFraction: 0.5, resetTime: null } }
+          ]
+        }
+      }
+    })
+  });
+  assert.equal(withUserTier.accountPlan, 'Google AI Ultra');
+
+  const withPlanInfoDisplay = await probe.probe({
+    detectProcessInfo: async () => ({ pid: 1, csrfToken: 'csrf', extensionPort: null }),
+    listeningPorts: async () => [54733],
+    callLs: async () => ({
+      userStatus: {
+        planStatus: { planInfo: { planDisplayName: 'Google AI Pro', planName: 'Pro' } },
+        cascadeModelConfigData: {
+          clientModelConfigs: [
+            { label: 'Gemini 3 Pro', modelOrAlias: { model: 'MA' }, quotaInfo: { remainingFraction: 0.5, resetTime: null } }
+          ]
+        }
+      }
+    })
+  });
+  assert.equal(withPlanInfoDisplay.accountPlan, 'Google AI Pro');
+});
+
 test('probe falls back to GetCommandModelConfigs when GetUserStatus has no userStatus', async () => {
   let callCount = 0;
   const result = await probe.probe({
