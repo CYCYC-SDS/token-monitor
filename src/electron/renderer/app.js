@@ -646,7 +646,7 @@ function formatLimitWindowValue(window, fillPercent, hasPercent) {
   return '';
 }
 
-function limitWindowNode(label, window, color, tone = 1) {
+function limitWindowNode(label, window, color, tone = 1, valueOverride = null) {
   const remaining = Number(window?.remainingPercent);
   const used = Number(window?.usedPercent);
   const showMeter = window?.showMeter !== false;
@@ -664,7 +664,7 @@ function limitWindowNode(label, window, color, tone = 1) {
   const name = document.createElement('span');
   name.textContent = window?.label || label;
   const value = document.createElement('span');
-  value.textContent = formatLimitWindowValue(window, fillPercent, hasPercent);
+  value.textContent = valueOverride != null ? valueOverride : formatLimitWindowValue(window, fillPercent, hasPercent);
   text.append(name, value);
   const meter = document.createElement('div');
   meter.className = 'limit-meter';
@@ -749,6 +749,26 @@ function renderLimits() {
       const visibleWindows = weeklyWindows.length > 0 ? weeklyWindows : [null];
       for (const weekly of visibleWindows) {
         const node = limitWindowNode(weekly?.label || 'Weekly', weekly, color, 0.78);
+        node.classList.add('limit-window-wide');
+        windows.append(node);
+      }
+    } else if (provider.provider === 'opencode') {
+      // Go reports session/weekly windows; Zen reports a prepaid balance (and, when the account is
+      // active, rolling/weekly). Show only the windows that exist — no empty `--` placeholders — and
+      // surface the Zen balance as a full-width, no-meter note when present.
+      const session = windowForKind(provider, 'session');
+      const weekly = windowForKind(provider, 'weekly');
+      if (session) windows.append(limitWindowNode('Session', session, color, 0.95));
+      if (weekly) windows.append(limitWindowNode('Weekly', weekly, color, 0.68));
+      // A signed-in Zen account (source 'web') always gets a Balance line — `$X.XX` when funded,
+      // `—` until then — so the card never collapses to an empty window area. `source` survives hub
+      // aggregation, unlike `accountLabel` which `publicLimits` strips. Go (source 'local') has no
+      // balance concept and is covered by its session/weekly windows above.
+      const hasBalance = typeof provider.balanceUsd === 'number' && Number.isFinite(provider.balanceUsd);
+      const zenLinked = provider.status === 'ok' && provider.source === 'web';
+      if (hasBalance || zenLinked) {
+        const balanceText = hasBalance ? formatLimitAmount(provider.balanceUsd) : '—';
+        const node = limitWindowNode('Balance', { showMeter: false }, color, 0.68, balanceText);
         node.classList.add('limit-window-wide');
         windows.append(node);
       }

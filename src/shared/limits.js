@@ -118,7 +118,8 @@ function normalizeLimitProvider(input) {
     status: normalizeStatus(input.status),
     source: normalizeSource(input.source),
     updatedAt: normalizeIsoTimestamp(input.updatedAt) || normalizeIsoTimestamp(input.checkedAt),
-    windows
+    windows,
+    balanceUsd: numberOrNull(input.balanceUsd)
   };
 }
 

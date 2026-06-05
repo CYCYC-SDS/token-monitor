@@ -150,6 +150,7 @@ The hub normalizes records before storing them.
 
 `limits.providers[].provider` is one of `claude`, `codex`, `cursor`, `antigravity`, or `opencode`.
 `limits.providers[].source` is one of `oauth`, `cli`, `web`, `rpc`, or `local`; `local` means the value was read from an on-disk store such as OpenCode Go usage from `opencode.db`.
+`limits.providers[].balanceUsd` is an optional prepaid credit balance in USD (OpenCode Zen); `null` when the provider has no balance concept or none could be read. A genuine `0` (no remaining credit) is distinct from `null`.
 `windows[].kind` is `session`, `weekly`, or `billing`.
 
 ## `GET /api/stats`

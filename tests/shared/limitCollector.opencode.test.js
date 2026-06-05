@@ -43,4 +43,52 @@ test('fetchOpenCodeLimits merges Go(local) windows with Zen(web) balance', async
   assert.strictEqual(p.status, 'ok');
   assert.ok(p.windows.some((w) => w.kind === 'session'));  // from Go
   assert.ok(p.windows.some((w) => w.kind === 'weekly'));   // from Zen
+  assert.strictEqual(p.balanceUsd, 5);                     // Zen prepaid balance is surfaced, not dropped
+});
+
+test('fetchOpenCodeLimits surfaces Zen balance even with no usage windows', async () => {
+  const now = Date.UTC(2026, 5, 4, 12, 0, 0);
+  const fakeZen = { status: 'ok', workspaceId: 'wrk_1', windows: [], balanceUsd: 4.5 };
+  const summary = await collectLimitsOnce(
+    { limitProviders: 'opencode', limitsEnabled: true, opencodeCookie: 'sess=1' },
+    { now: () => now, opencodeCollectGo: () => ({ status: 'notConfigured', windows: [] }), opencodeFetchZen: async () => fakeZen }
+  );
+  const p = summary.providers.find((x) => x.provider === 'opencode');
+  assert.strictEqual(p.status, 'ok');
+  assert.strictEqual(p.balanceUsd, 4.5);
+  assert.deepStrictEqual(p.windows, []);
+});
+
+test('opencode balanceUsd stays null when Zen returns a null balance (not coerced to 0)', async () => {
+  const now = Date.UTC(2026, 5, 4, 12, 0, 0);
+  const fakeZen = { status: 'ok', workspaceId: 'wrk_1', windows: [], balanceUsd: null };
+  const summary = await collectLimitsOnce(
+    { limitProviders: 'opencode', limitsEnabled: true, opencodeCookie: 'sess=1' },
+    { now: () => now, opencodeCollectGo: () => ({ status: 'notConfigured', windows: [] }), opencodeFetchZen: async () => fakeZen }
+  );
+  const p = summary.providers.find((x) => x.provider === 'opencode');
+  assert.strictEqual(p.status, 'ok');
+  assert.strictEqual(p.balanceUsd, null);
+});
+
+test('opencode surfaces a genuine zero balance ($0.00) as 0, not null', async () => {
+  const now = Date.UTC(2026, 5, 4, 12, 0, 0);
+  const fakeZen = { status: 'ok', workspaceId: 'wrk_1', windows: [], balanceUsd: 0 };
+  const summary = await collectLimitsOnce(
+    { limitProviders: 'opencode', limitsEnabled: true, opencodeCookie: 'sess=1' },
+    { now: () => now, opencodeCollectGo: () => ({ status: 'notConfigured', windows: [] }), opencodeFetchZen: async () => fakeZen }
+  );
+  const p = summary.providers.find((x) => x.provider === 'opencode');
+  assert.strictEqual(p.balanceUsd, 0);
+});
+
+test('opencode provider balanceUsd is null when Zen reports no balance', async () => {
+  const now = Date.UTC(2026, 5, 4, 12, 0, 0);
+  const fakeGo = { status: 'ok', identity: 'go:/x', windows: [{ kind: 'session', used: 1, limit: 12, usedPercent: 8.3, resetsAt: new Date(now).toISOString(), windowMinutes: 300 }] };
+  const summary = await collectLimitsOnce(
+    { limitProviders: 'opencode', limitsEnabled: true },
+    { now: () => now, opencodeCollectGo: () => fakeGo }
+  );
+  const p = summary.providers.find((x) => x.provider === 'opencode');
+  assert.strictEqual(p.balanceUsd, null);
 });

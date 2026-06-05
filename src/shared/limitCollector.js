@@ -1167,6 +1167,7 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
   let source = 'local';
   let accountLabel = '';
   let accountKey = '';
+  let balanceUsd = null;
 
   const go = collectGo({ env: deps.env || process.env, now: () => nowMs });
   if (go.status === 'ok') {
@@ -1182,6 +1183,7 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
     if (zen.status === 'ok') {
       windows.push(...zen.windows);
       status = 'ok'; source = 'web';
+      if (typeof zen.balanceUsd === 'number' && Number.isFinite(zen.balanceUsd)) balanceUsd = zen.balanceUsd;
       if (!accountLabel) accountLabel = 'Zen';
       if (!accountKey) accountKey = hashKey('opencode', `zen:${zen.workspaceId || ''}`);
     } else if (status !== 'ok' && ['unauthorized', 'sourceRateLimited', 'unavailable'].includes(zen.status)) {
@@ -1189,7 +1191,7 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
     }
   }
 
-  return normalizeLimitProvider({ provider: 'opencode', accountKey, accountLabel, source, status, updatedAt, windows });
+  return normalizeLimitProvider({ provider: 'opencode', accountKey, accountLabel, source, status, updatedAt, windows, balanceUsd });
 }
 
 function providerStatusFromError(error) {
