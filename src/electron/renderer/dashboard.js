@@ -158,7 +158,7 @@ function renderActivity() {
   // like GitHub/codex, so there's no duplicate leading month label.
   const now = new Date(`${end}T00:00:00Z`);
   const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 11, 1)).toISOString().slice(0, 10);
-  const gap = 3;
+  const gap = 4;
   let heat = charts.contribHeatmap(daily, { cell: 14, gap, startDate: start, endDate: end });
   const avail = els.heatmap.clientWidth || 0;
   if (heat.weeks > 0 && avail > 0) {

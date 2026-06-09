@@ -367,7 +367,7 @@
     const botPad = 16;
     const pitch = (model.cell || 11) + (model.gap || 2);
     const cells = (model.cells || []).map((c) =>
-      `<rect class="heat lvl-${c.intensity}" data-d="${c.date}" x="${svgRound(c.x)}" y="${svgRound(c.y)}" width="${svgRound(c.size)}" height="${svgRound(c.size)}" rx="2">${o.titleOf(c) ? `<title>${escapeXml(o.titleOf(c))}</title>` : ''}</rect>`
+      `<rect class="heat lvl-${c.intensity}" data-d="${c.date}" x="${svgRound(c.x)}" y="${svgRound(c.y)}" width="${svgRound(c.size)}" height="${svgRound(c.size)}" rx="3">${o.titleOf(c) ? `<title>${escapeXml(o.titleOf(c))}</title>` : ''}</rect>`
     ).join('');
     // Month labels sit BELOW the grid, left-anchored at the column where each month
     // starts — so the current month naturally lands on whichever column its 1st falls in
