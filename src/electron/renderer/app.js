@@ -583,15 +583,25 @@ async function resetTokscaleToBundled() {
 }
 function easeOutQuart(t) { return 1 - Math.pow(1 - t, 4); }
 
+// A single in-flight tween on the headline number. Without cancelling it, an
+// orphaned loop from the previous period keeps writing its old value every
+// frame and overwrites a later static update (e.g. switching to a zero period
+// mid-animation).
+let numberAnimHandle = 0;
+function cancelNumberAnimation() {
+  if (numberAnimHandle) { cancelAnimationFrame(numberAnimHandle); numberAnimHandle = 0; }
+}
+
 function animateNumber(el, from, to, duration = 2200) {
+  cancelNumberAnimation();
   const start = performance.now();
   const delta = to - from;
   function frame(now) {
     const progress = Math.min(1, (now - start) / duration);
     el.textContent = formatNumber(from + delta * easeOutQuart(progress));
-    if (progress < 1) requestAnimationFrame(frame);
+    numberAnimHandle = progress < 1 ? requestAnimationFrame(frame) : 0;
   }
-  requestAnimationFrame(frame);
+  numberAnimHandle = requestAnimationFrame(frame);
 }
 
 function rowWidth(value, max) {
@@ -1462,11 +1472,17 @@ function render() {
   if (state.openSession) { els.sessionDetail.classList.remove('hidden'); els.sessionDetailHead.classList.remove('hidden'); } else { els.sessionDetail.classList.add('hidden'); els.sessionDetailHead.classList.add('hidden'); }
   const period = state.stats.periods?.[state.period] || { totalTokens: 0, costUsd: 0, clients: {} };
   const nextTotal = Number(period.totalTokens || 0);
+  const totalChanged = nextTotal !== state.currentTotal;
   if (state.suppressInitialNumberAnimation) {
+    cancelNumberAnimation();
     els.totalTokens.textContent = formatNumber(nextTotal);
     state.suppressInitialNumberAnimation = false;
-  } else {
+  } else if (totalChanged) {
     animateNumber(els.totalTokens, state.currentTotal, nextTotal);
+    pulseLiveDot();
+  } else {
+    cancelNumberAnimation();
+    els.totalTokens.textContent = formatNumber(nextTotal);
   }
   state.currentTotal = nextTotal;
   els.cost.textContent = formatCost(period.costUsd || 0);
@@ -1544,6 +1560,16 @@ function liveDotTitle(mode, connected) {
 function setLiveDot(connected) {
   els.liveDot.classList.toggle('live', Boolean(connected));
   els.liveDot.title = liveDotTitle(state.mode, connected);
+}
+
+// Flare the live dot once when fresh data arrives. Re-arming the one-shot
+// animation needs a class remove + forced reflow before re-adding.
+function pulseLiveDot() {
+  const dot = els.liveDot;
+  if (!dot || !dot.classList.contains('live')) return;
+  dot.classList.remove('pulse');
+  void dot.offsetWidth;
+  dot.classList.add('pulse');
 }
 
 async function refreshStats(options = {}) {
