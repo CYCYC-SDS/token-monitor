@@ -1106,20 +1106,21 @@ function serviceStatusLabel(status) {
   return t('serviceStatus.unknown');
 }
 
-function serviceStatusComponentText(provider) {
-  const { visible, overflow } = serviceStatusPresentationApi.affectedComponentNames(provider.componentIssues, 2);
-  if (!visible.length) return '';
-  const names = visible.join(t('serviceStatus.listSeparator'));
-  return overflow > 0 ? `${names} ${t('serviceStatus.componentsMore', { count: overflow })}` : names;
-}
-
 function serviceStatusMeta(provider) {
+  // Show a short affected-component *count* rather than the names: the names are
+  // the variable-length part that overflowed the line, while the count keeps the
+  // real scope visible — an incident title (line 2) often understates it, e.g.
+  // "errors on Haiku" while claude.ai/API/Code are all degraded. Full names stay
+  // in the row tooltip (set in renderServiceStatus).
   const parts = [];
-  const components = serviceStatusComponentText(provider);
-  if (components) parts.push(components);
+  const affectedCount = serviceStatusPresentationApi.affectedComponentNames(provider.componentIssues).all.length;
+  if (affectedCount > 0) parts.push(t('serviceStatus.components', { count: affectedCount }));
   if (Number(provider.incidentCount || 0) > 0) parts.push(t('serviceStatus.incidents', { count: provider.incidentCount }));
   if (Number(provider.maintenanceCount || 0) > 0) parts.push(t('serviceStatus.maintenance', { count: provider.maintenanceCount }));
-  return parts.join(' · ') || t('serviceStatus.noIssues');
+  if (parts.length) return parts.join(' · ');
+  // "No ongoing issues" only reads true for a healthy provider — a degraded one
+  // with nothing to count shows just its timestamp rather than a contradiction.
+  return provider.status === 'ok' ? t('serviceStatus.noIssues') : '';
 }
 
 function visibleServiceProviderIds() {
@@ -1181,7 +1182,7 @@ function renderServiceStatus() {
     head.append(title, pill);
     const description = document.createElement('div');
     description.className = 'service-status-description';
-    description.textContent = provider.description || t('serviceStatus.unknown');
+    description.textContent = serviceStatusPresentationApi.statusHeadline(provider) || t('serviceStatus.unknown');
     const meta = document.createElement('div');
     meta.className = 'service-status-meta';
     const metaInfo = serviceStatusMeta(provider);

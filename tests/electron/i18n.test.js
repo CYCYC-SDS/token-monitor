@@ -129,6 +129,12 @@ test('service status provider preference labels exist in Chinese', () => {
   assert.equal(translate('zh-TW', 'serviceStatus.configureProviders', { name: '狀態' }), '設定 狀態 服務');
 });
 
+test('the affected-component count is localized', () => {
+  assert.equal(translate('en', 'serviceStatus.components', { count: 4 }), 'Affected: 4');
+  assert.equal(translate('zh-TW', 'serviceStatus.components', { count: 4 }), '受影響組件：4');
+  assert.equal(translate('zh-CN', 'serviceStatus.components', { count: 4 }), '受影响组件：4');
+});
+
 test('relative status timestamps are localized', () => {
   assert.equal(translate('zh-TW', 'serviceStatus.agoSeconds', { n: 5 }), '5 秒前');
   assert.equal(translate('zh-TW', 'serviceStatus.agoMinutes', { n: 3 }), '3 分鐘前');

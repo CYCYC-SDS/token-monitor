@@ -45,9 +45,38 @@ test('summarizeStatuspageProvider converts statuspage summary into compact provi
     checkedAt: '2026-06-06T02:31:00Z',
     updatedAt: '2026-06-06T02:30:00Z',
     componentIssues: [{ name: 'API', status: 'degraded_performance' }],
+    incidentTitle: 'API latency',
     incidentCount: 1,
     maintenanceCount: 1
   });
+});
+
+test('summarizeStatuspageProvider surfaces the newest active incident name as incidentTitle', () => {
+  const payload = {
+    status: { indicator: 'minor', description: 'Partially Degraded Service' },
+    incidents: [
+      { name: 'Elevated errors on Claude Haiku 4.5', status: 'identified' },
+      { name: 'Older active incident', status: 'monitoring' }
+    ]
+  };
+
+  const result = summarizeStatuspageProvider(provider, payload, { checkedAt: '2026-06-06T02:31:00Z' });
+
+  // The first entry mirrors the headline the official status page leads with.
+  assert.equal(result.incidentTitle, 'Elevated errors on Claude Haiku 4.5');
+  assert.equal(result.incidentCount, 2);
+});
+
+test('summarizeStatuspageProvider leaves incidentTitle empty when no incident is active', () => {
+  const payload = {
+    status: { indicator: 'none', description: 'All Systems Operational' },
+    incidents: [{ name: 'Resolved last week', status: 'resolved' }]
+  };
+
+  const result = summarizeStatuspageProvider(provider, payload, { checkedAt: '2026-06-06T02:31:00Z' });
+
+  assert.equal(result.incidentTitle, '');
+  assert.equal(result.incidentCount, 0);
 });
 
 test('summarizeStatuspageProvider reports unknown when a provider fetch fails', () => {
@@ -58,6 +87,7 @@ test('summarizeStatuspageProvider reports unknown when a provider fetch fails', 
 
   assert.equal(result.status, 'unknown');
   assert.equal(result.error, 'network down');
+  assert.equal(result.incidentTitle, '');
   assert.equal(result.incidentCount, 0);
   assert.equal(result.maintenanceCount, 0);
 });

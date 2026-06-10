@@ -20,6 +20,16 @@
     };
   }
 
+  // The card's second line leads with the active incident's name when there is
+  // one — it's far more useful (and what the official page headlines) than the
+  // generic "Partially Degraded Service", which the status pill already conveys.
+  // Falls back to the overall status description when no incident is active.
+  function statusHeadline(provider) {
+    const incident = String(provider?.incidentTitle || '').trim();
+    if (incident) return incident;
+    return String(provider?.description || '').trim();
+  }
+
   function agoBucket(ms) {
     const total = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
     if (total < 60) return { unit: 'seconds', value: total };
@@ -27,5 +37,5 @@
     return { unit: 'hours', value: Math.floor(total / 3600) };
   }
 
-  return { affectedComponentNames, agoBucket };
+  return { affectedComponentNames, agoBucket, statusHeadline };
 });

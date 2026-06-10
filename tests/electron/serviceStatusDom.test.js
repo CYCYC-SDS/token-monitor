@@ -42,6 +42,24 @@ test('renderer surfaces affected component names through the presentation helper
   assert.match(app, /serviceStatusPresentationApi\.affectedComponentNames/);
 });
 
+test('the status description line leads with the active incident headline', () => {
+  const app = readRendererFile('app.js');
+  const renderBody = functionBody(app, 'renderServiceStatus', 'refreshServiceStatus');
+  assert.match(renderBody, /serviceStatusPresentationApi\.statusHeadline/);
+});
+
+test('the meta line shows an affected-component count, not the verbose name list', () => {
+  const app = readRendererFile('app.js');
+  // The component names made the meta line overflow; the full list now lives only
+  // in the row tooltip (meta.title), so the dedicated name-joining helper is gone.
+  assert.doesNotMatch(app, /function serviceStatusComponentText/);
+  const metaBody = functionBody(app, 'serviceStatusMeta', 'visibleServiceProviderIds');
+  // A short count keeps the real scope visible (an incident title can understate
+  // it) without reintroducing the overflow that the joined name list caused.
+  assert.match(metaBody, /serviceStatus\.components/);
+  assert.doesNotMatch(metaBody, /listSeparator/);
+});
+
 test('renderer fetches service status only through preload IPC', () => {
   const app = readRendererFile('app.js');
   const renderBody = functionBody(app, 'renderServiceStatus', 'refreshServiceStatus');

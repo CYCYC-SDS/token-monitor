@@ -5,7 +5,8 @@ const test = require('node:test');
 
 const {
   affectedComponentNames,
-  agoBucket
+  agoBucket,
+  statusHeadline
 } = require('../../src/electron/renderer/serviceStatusPresentation');
 
 test('affectedComponentNames splits names into a visible slice and overflow count', () => {
@@ -41,6 +42,23 @@ test('affectedComponentNames ignores blank names and tolerates bad input', () =>
     visible: ['Search'],
     overflow: 0
   });
+});
+
+test('statusHeadline prefers the active incident title over the generic description', () => {
+  assert.equal(
+    statusHeadline({ incidentTitle: 'Elevated errors on Claude Haiku 4.5', description: 'Partially Degraded Service' }),
+    'Elevated errors on Claude Haiku 4.5'
+  );
+});
+
+test('statusHeadline falls back to the description when no incident is active', () => {
+  assert.equal(statusHeadline({ incidentTitle: '', description: 'All Systems Operational' }), 'All Systems Operational');
+  assert.equal(statusHeadline({ description: 'All Systems Operational' }), 'All Systems Operational');
+});
+
+test('statusHeadline returns an empty string when nothing is known', () => {
+  assert.equal(statusHeadline({}), '');
+  assert.equal(statusHeadline(null), '');
 });
 
 test('agoBucket buckets into seconds, minutes, and hours', () => {

@@ -88,6 +88,7 @@ function summarizeStatuspageProvider(provider, payload, options = {}) {
       checkedAt,
       updatedAt: '',
       componentIssues: [],
+      incidentTitle: '',
       incidentCount: 0,
       maintenanceCount: 0,
       error: options.error?.message || 'Unable to check status'
@@ -108,6 +109,9 @@ function summarizeStatuspageProvider(provider, payload, options = {}) {
     checkedAt,
     updatedAt: String(payload.page?.updated_at || payload.status?.updated_at || '').trim(),
     componentIssues: issues,
+    // The newest active incident's name — the headline the official status page
+    // leads with (e.g. "Elevated errors on Claude Haiku 4.5"). Empty when none.
+    incidentTitle: incidents.length ? String(incidents[0].name || '').trim() : '',
     incidentCount: incidents.length,
     maintenanceCount: maintenances.length
   };
