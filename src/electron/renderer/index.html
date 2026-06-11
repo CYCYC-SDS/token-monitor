@@ -23,7 +23,7 @@
           <div class="actions-hotspot" title="Window controls"></div>
           <div class="window-actions">
             <button id="pinButton" class="icon-button" title="Cycle window behavior">⇧</button>
-            <button id="settingsButton" class="icon-button" title="Settings">⚙</button>
+            <span id="titlebarActionSlot"><button id="refreshButton" class="refresh-button" title="Refresh">↻</button></span>
             <button id="minButton" class="icon-button" title="Minimize">−</button>
             <button id="closeButton" class="icon-button" title="Close">×</button>
           </div>
@@ -210,6 +210,7 @@
               <label class="checkbox-label"><input id="liveDotInput" type="checkbox" /><span data-i18n="settings.appearance.liveIndicator">Live Indicator</span></label>
               <label class="checkbox-label"><input id="toolIconsInput" type="checkbox" /><span data-i18n="settings.appearance.toolIcons">Tool Icons</span></label>
               <label class="checkbox-label"><input id="titleIconInput" type="checkbox" /><span data-i18n="settings.appearance.titleIcon">Use Title Icon</span></label>
+              <label class="checkbox-label"><input id="settingsInTitlebarInput" type="checkbox" /><span data-i18n="settings.appearance.settingsInTitlebar">Settings button in title bar</span></label>
               <label><span class="slider-label"><span data-i18n="settings.appearance.glass">Glass</span><button id="resetGlassButton" type="button" class="reset-appearance-button reset-inline" title="Reset glass" data-i18n-title="settings.appearance.resetGlass">↺</button></span><input id="glassInput" type="range" min="0" max="100" step="1" /></label>
               <label><span class="slider-label"><span data-i18n="settings.appearance.depth">Depth</span><button id="resetDepthButton" type="button" class="reset-appearance-button reset-inline" title="Reset depth" data-i18n-title="settings.appearance.resetDepth">↺</button></span><input id="blurInput" type="range" min="0" max="100" step="1" /></label>
               <label><span class="slider-label"><span data-i18n="settings.appearance.zoom">Zoom</span><button id="resetZoomButton" type="button" class="reset-appearance-button reset-inline" title="Reset zoom" data-i18n-title="settings.appearance.resetZoom">↺</button></span><input id="zoomInput" type="range" min="70" max="160" step="5" /></label>
@@ -433,7 +434,7 @@
           </button>
           <button id="appUpdatePillDismiss" type="button" class="update-pill-dismiss" title="Dismiss this version" aria-label="Dismiss this version">×</button>
         </div>
-        <button id="refreshButton" class="refresh-button" title="Refresh">↻</button>
+        <span id="footerActionSlot"><button id="settingsButton" class="icon-button" title="Settings">⚙</button></span>
       </footer>
     </main>
     <button id="floatingBubbleTab" class="floating-bubble-tab" type="button" title="Show Token Monitor" aria-label="Show Token Monitor" data-i18n-title="floatingBubble.expand" data-i18n-aria-label="floatingBubble.expand">

@@ -261,10 +261,10 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 }
 .actions-hotspot {
   position: absolute;
-  top: -12px;
-  right: -10px;
-  width: 24px;
-  height: 16px;
+  top: -14px;
+  right: -12px;
+  width: 28px;
+  height: 22px;
   z-index: 5;
 }
 .window-actions {
@@ -278,24 +278,32 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   opacity: 0;
   pointer-events: none;
   transform: translateY(-2px);
-  transition: opacity 160ms ease, transform 160ms ease;
+  transition: opacity 160ms ease 280ms, transform 160ms ease 280ms;
   z-index: 4;
 }
+#titlebarActionSlot { display: contents; }
+#footerActionSlot { display: contents; }
+/* Size the swappable action button by its slot, not by its element identity,
+   so Settings/Refresh look right in either location. */
+#titlebarActionSlot .icon-button, #titlebarActionSlot .refresh-button { width: 34px; height: 28px; font-size: 14px; }
+#footerActionSlot .icon-button, #footerActionSlot .refresh-button { width: 34px; height: 30px; font-size: 16px; }
 .actions-hotspot:hover ~ .window-actions, .window-actions:hover, .window-actions:focus-within, .shell.settings-open .window-actions {
   opacity: 1;
   pointer-events: auto;
   transform: translateY(0);
+  transition-delay: 0ms;
 }
 .title-controls .tabs {
   position: absolute;
   inset: 0;
   width: 100%;
-  transition: opacity 160ms ease, transform 160ms ease;
+  transition: opacity 160ms ease 280ms, transform 160ms ease 280ms;
 }
 .title-controls:has(.actions-hotspot:hover) .tabs, .title-controls:has(.window-actions:hover) .tabs, .title-controls:has(.window-actions:focus-within) .tabs, .shell.settings-open .title-controls .tabs {
   opacity: 0;
   transform: translateY(2px);
   pointer-events: none;
+  transition-delay: 0ms;
 }
 .icon-button, .refresh-button, .settings-actions button, .shortcut-recorder button, .tab, .mode-button {
   border: 1px solid var(--line);
