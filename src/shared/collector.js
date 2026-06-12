@@ -10,7 +10,7 @@ const { readJson, sharedDataDir } = require('./config');
 const { appVersion } = require('./appVersion');
 const { normalizeClientsCsv } = require('./clientTracking');
 const { tokscalePackageNameForPlatform, tokscalePlatformKey } = require('./tokscalePlatform');
-const { emptyPeriod, extractUsageFromTokscale } = require('./usage');
+const { applyPeriodDelta, emptyPeriod, extractUsageFromTokscale } = require('./usage');
 const { parseGraphResult, normalizeHistory } = require('./history');
 const { collectLimitsOnce, createLimitsCollector } = require('./limitCollector');
 const cursorAuth = require('./cursorAuth');
@@ -356,15 +356,26 @@ async function collectUsageOnce(options) {
   if (normalizedClients) {
     await maybeSyncCursor(normalizedClients, options.logger);
     await maybeSyncAntigravity(normalizedClients, options.logger, options.homeDir || os.homedir());
-    // Serial on purpose: concurrent scans triple the peak fd/CPU load, and on
-    // macOS the simultaneous Gatekeeper assessments of the ad-hoc-signed binary
-    // can exhaust syspolicyd's fds and break spctl system-wide (issue #15).
-    const todayJson = await runTokscale({ clients: normalizedClients, flags: ['--today'], commandTimeoutMs });
-    const monthJson = await runTokscale({ clients: normalizedClients, flags: ['--month'], commandTimeoutMs });
-    const allTimeJson = await runTokscale({ clients: normalizedClients, flags: ['--since', allTimeSince], commandTimeoutMs });
-    today = extractUsageFromTokscale(todayJson);
-    month = extractUsageFromTokscale(monthJson);
-    allTime = extractUsageFromTokscale(allTimeJson);
+    const anchor = options.todayOnlyAnchor;
+    if (anchor && anchor.dateKey === localTodayKey()) {
+      // Anchored tick (watch-triggered): every tokscale period scan costs the
+      // same full load + filter, so scan only --today and update the broader
+      // windows exactly via applyPeriodDelta — one spawn instead of three.
+      const todayJson = await runTokscale({ clients: normalizedClients, flags: ['--today'], commandTimeoutMs });
+      today = extractUsageFromTokscale(todayJson);
+      month = applyPeriodDelta(anchor.month, today, anchor.today);
+      allTime = applyPeriodDelta(anchor.allTime, today, anchor.today);
+    } else {
+      // Serial on purpose: concurrent scans triple the peak fd/CPU load, and on
+      // macOS the simultaneous Gatekeeper assessments of the ad-hoc-signed binary
+      // can exhaust syspolicyd's fds and break spctl system-wide (issue #15).
+      const todayJson = await runTokscale({ clients: normalizedClients, flags: ['--today'], commandTimeoutMs });
+      const monthJson = await runTokscale({ clients: normalizedClients, flags: ['--month'], commandTimeoutMs });
+      const allTimeJson = await runTokscale({ clients: normalizedClients, flags: ['--since', allTimeSince], commandTimeoutMs });
+      today = extractUsageFromTokscale(todayJson);
+      month = extractUsageFromTokscale(monthJson);
+      allTime = extractUsageFromTokscale(allTimeJson);
+    }
     applySessionTimestamps({ today, month, allTime }, options.homeDir || os.homedir());
   }
   const summary = {
@@ -484,6 +495,9 @@ function startCollector(options) {
   let pendingForceLimits = false;
   let pendingForceHistory = false;
   let lastHistoryAt = 0;
+  // Last full-scan snapshot; lets watch ticks scan only --today and derive
+  // month/allTime exactly (applyPeriodDelta). Reset by every full tick.
+  let anchor = null;
   let pendingWaiters = [];
   let debounceTimer = null;
   let intervalTimer = null;
@@ -499,6 +513,8 @@ function startCollector(options) {
   async function performTick(reason, tickOptions = {}) {
     const includeHistory = shouldIncludeHistory(Date.now(), lastHistoryAt, historyIntervalMs, Boolean(tickOptions.forceHistory), historyEnabled);
     if (includeHistory) lastHistoryAt = Date.now();
+    const todayKey = localTodayKey();
+    const anchored = Boolean(tickOptions.todayOnly && anchor && anchor.dateKey === todayKey);
     try {
       const summary = await collectUsageOnce({
         ...options,
@@ -510,9 +526,11 @@ function startCollector(options) {
         agentRuntime,
         limitsCollector,
         includeHistory,
-        forceLimits: Boolean(tickOptions.forceLimits)
+        forceLimits: Boolean(tickOptions.forceLimits),
+        todayOnlyAnchor: anchored ? anchor : null
       });
       if (stopped) return;
+      if (!anchored) anchor = { dateKey: todayKey, today: summary.today, month: summary.month, allTime: summary.allTime };
       await onUpdate?.(summary, reason);
     } catch (error) {
       if (stopped) return;
@@ -552,7 +570,7 @@ function startCollector(options) {
       // Re-arm instead of queueing onto the in-flight tick: the coalesce path
       // would re-run immediately on completion, stacking scans back-to-back.
       if (tickInFlight) { scheduleTick(reason); return; }
-      runTick(reason);
+      runTick(reason, { todayOnly: true });
     }, watchDebounceMs);
   }
 

@@ -671,4 +671,47 @@ function aggregateDevices(devices, staleAfterMs, nowMs = Date.now()) {
   return aggregate;
 }
 
-module.exports = { PERIODS, aggregateDevices, aggregateHistory, carryDeviceHistory, emptyPeriod, extractUsageFromTokscale, mergeDeviceRecord, normalizeDeviceRecord, normalizePeriod };
+// Exact broader-period update from a fresh --today scan. Tokens written since the
+// anchor full scan belong to today AND every broader window simultaneously, and
+// session logs are append-only, so base + (freshToday − anchorToday) is an
+// identity, not an estimate. The anchor stops being valid once the local date
+// rolls past the one it was taken on — callers must run a full scan then.
+// Recurses over the union of keys so it covers every numeric field a period may
+// grow (clients/models/clientModels/sessions/...) without per-field bookkeeping.
+function applyPeriodDelta(base, freshToday, anchorToday) {
+  return deltaValue(base, freshToday, anchorToday, '');
+}
+
+function deltaValue(base, fresh, anchor, key) {
+  if (key === 'startedAt') {
+    const baseMs = timestampMs(base);
+    const freshMs = timestampMs(fresh);
+    if (baseMs && freshMs) return baseMs <= freshMs ? base : fresh;
+    return base || fresh || '';
+  }
+  if (key === 'lastUsedAt') {
+    const baseMs = timestampMs(base);
+    const freshMs = timestampMs(fresh);
+    if (baseMs && freshMs) return baseMs >= freshMs ? base : fresh;
+    return base || fresh || '';
+  }
+  const sample = [base, fresh, anchor].find((value) => value !== undefined && value !== null);
+  if (typeof sample === 'number') return Math.max(0, asNumber(base) + asNumber(fresh) - asNumber(anchor));
+  if (typeof sample === 'string') return base ?? fresh;
+  if (sample && typeof sample === 'object') {
+    const keys = new Set([...Object.keys(base || {}), ...Object.keys(fresh || {}), ...Object.keys(anchor || {})]);
+    const result = {};
+    for (const childKey of keys) {
+      result[childKey] = deltaValue(
+        base ? base[childKey] : undefined,
+        fresh ? fresh[childKey] : undefined,
+        anchor ? anchor[childKey] : undefined,
+        childKey
+      );
+    }
+    return result;
+  }
+  return base ?? fresh;
+}
+
+module.exports = { PERIODS, aggregateDevices, aggregateHistory, applyPeriodDelta, carryDeviceHistory, emptyPeriod, extractUsageFromTokscale, mergeDeviceRecord, normalizeDeviceRecord, normalizePeriod };
