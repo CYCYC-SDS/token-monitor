@@ -578,7 +578,9 @@ async function maybeUseClaudeCliInsteadOfOauth(oauthProvider, platform, nowMs, d
     return normalizeLimitProvider({
       ...cliProvider,
       accountKey: oauthProvider?.accountKey || cliProvider.accountKey,
-      accountLabel: oauthProvider?.accountLabel || cliProvider.accountLabel
+      accountLabel: oauthProvider?.accountLabel || cliProvider.accountLabel,
+      source: 'oauth',
+      sourceDetail: 'cli'
     });
   } catch (_) {
     return oauthProvider;

@@ -205,7 +205,8 @@ test('Claude limits on macOS prefer CLI usage when OAuth reports an exhausted se
     ].join('\n')
   });
 
-  assert.equal(provider.source, 'cli');
+  assert.equal(provider.source, 'oauth');
+  assert.equal(provider.sourceDetail, 'cli');
   assert.equal(provider.windows[0].usedPercent, 1);
   assert.equal(provider.windows[0].remainingPercent, 99);
   assert.equal(provider.windows[1].usedPercent, 0);
@@ -249,7 +250,8 @@ test('Claude macOS CLI replacement preserves OAuth plan label', async () => {
     ].join('\n')
   });
 
-  assert.equal(provider.source, 'cli');
+  assert.equal(provider.source, 'oauth');
+  assert.equal(provider.sourceDetail, 'cli');
   assert.equal(provider.accountLabel, 'Max 5x');
   assert.equal(provider.windows[0].remainingPercent, 99);
 });

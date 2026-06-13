@@ -9,6 +9,7 @@ const {
   limitProviderCapabilityTags,
   limitProviderMainDeviceLabel,
   limitProviderProvenance,
+  limitProviderSourceLabel,
   limitProviderSettingsTags
 } = require('../../src/electron/renderer/limitProviderPresentation');
 
@@ -76,6 +77,15 @@ test('detected settings tags show only current source after status', () => {
     limitProviderSettingsTags({ provider: 'opencode', status: 'ok', source: 'web' })
       .map((tag) => tag.label),
     ['Linked', 'Web']
+  );
+  assert.deepEqual(
+    limitProviderSettingsTags({ provider: 'claude', status: 'ok', source: 'oauth', sourceDetail: 'cli' })
+      .map((tag) => tag.label),
+    ['Live', 'OAuth + CLI']
+  );
+  assert.equal(
+    limitProviderSourceLabel({ provider: 'claude', source: 'oauth', sourceDetail: 'cli' }),
+    'OAuth + CLI'
   );
 });
 
