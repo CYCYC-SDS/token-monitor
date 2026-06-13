@@ -4,9 +4,9 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const test = require('node:test');
 
-const { fetchClaudeLimits } = require('../../src/shared/limitCollector');
+const { claudeCommandCandidates, fetchClaudeLimits, mapClaudeCliUsageToProvider } = require('../../src/shared/limitCollector');
 
-function fakeSpawnForClaudeUsage(expectedCommand = 'claude') {
+function fakeSpawnForClaudeUsage(expectedCommand = 'claude.cmd') {
   return (command, args) => {
     assert.equal(command, expectedCommand);
     assert.deepEqual(args, ['/usage']);
@@ -56,4 +56,266 @@ test('Claude limits fall back to direct CLI usage on Windows when OAuth usage is
   assert.equal(provider.windows[0].usedPercent, 5);
   assert.equal(provider.windows[1].kind, 'weekly');
   assert.equal(provider.windows[1].usedPercent, 20);
+});
+
+test('Claude limits read Windows Credential Manager credentials when credential files are absent', async () => {
+  const provider = await fetchClaudeLimits({}, {
+    platform: 'win32',
+    now: () => Date.parse('2026-06-11T00:00:00Z'),
+    claudeCredentialPath: 'C:\\Users\\Javis\\.claude\\.credentials.json',
+    stat: async () => {
+      const error = new Error('missing');
+      error.code = 'ENOENT';
+      throw error;
+    },
+    readWindowsCredentialSecret: async (service, targets) => {
+      assert.equal(service, 'Claude Code-credentials');
+      assert.equal(targets.includes('Claude Code-credentials'), true);
+      return JSON.stringify({
+        claudeAiOauth: {
+          accessToken: 'credential-manager-token',
+          refreshToken: 'credential-manager-refresh',
+          expiresAt: Date.parse('2026-06-12T00:00:00Z'),
+          subscriptionType: 'max',
+          rateLimitTier: 'default_claude_max_5x'
+        }
+      });
+    },
+    fetch: async (_url, options) => {
+      assert.equal(options.headers.authorization, 'Bearer credential-manager-token');
+      return {
+        ok: true,
+        json: async () => ({
+          five_hour: {
+            utilization: 12,
+            resets_at: '2026-06-11T05:00:00Z'
+          }
+        })
+      };
+    }
+  });
+
+  assert.equal(provider.provider, 'claude');
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.source, 'oauth');
+  assert.equal(provider.accountLabel, 'Max 5x');
+  assert.equal(provider.windows[0].usedPercent, 12);
+});
+
+test('Claude OAuth usage mapping accepts camelCase response fields', async () => {
+  const provider = await fetchClaudeLimits({}, {
+    platform: 'linux',
+    now: () => Date.parse('2026-06-11T00:00:00Z'),
+    claudeCredentialPath: '/tmp/claude-credentials.json',
+    stat: async () => ({ mtimeMs: 1 }),
+    readFile: async () => JSON.stringify({
+      claudeAiOauth: {
+        accessToken: 'access-token',
+        expiresAt: Date.parse('2026-06-12T00:00:00Z')
+      }
+    }),
+    fetch: async () => ({
+      ok: true,
+      json: async () => ({
+        fiveHour: {
+          utilization: 34,
+          resetsAt: '2026-06-11T05:00:00Z'
+        },
+        sevenDay: {
+          utilization: 56,
+          resetsAt: '2026-06-18T00:00:00Z'
+        }
+      })
+    })
+  });
+
+  assert.equal(provider.windows[0].kind, 'session');
+  assert.equal(provider.windows[0].usedPercent, 34);
+  assert.equal(provider.windows[0].resetsAt, '2026-06-11T05:00:00.000Z');
+  assert.equal(provider.windows[1].kind, 'weekly');
+  assert.equal(provider.windows[1].usedPercent, 56);
+  assert.equal(provider.windows[1].resetsAt, '2026-06-18T00:00:00.000Z');
+});
+
+test('Claude OAuth usage mapping normalizes fractional utilization values', async () => {
+  const provider = await fetchClaudeLimits({}, {
+    platform: 'darwin',
+    now: () => Date.parse('2026-06-11T00:00:00Z'),
+    claudeCredentialPath: '/tmp/claude-credentials.json',
+    stat: async () => ({ mtimeMs: 1 }),
+    readFile: async () => JSON.stringify({
+      claudeAiOauth: {
+        accessToken: 'access-token',
+        expiresAt: Date.parse('2026-06-12T00:00:00Z')
+      }
+    }),
+    fetch: async () => ({
+      ok: true,
+      json: async () => ({
+        fiveHour: {
+          utilization: 0.01,
+          resetsAt: '2026-06-11T08:00:00Z'
+        },
+        sevenDay: {
+          utilization: 0,
+          resetsAt: '2026-06-18T10:00:00Z'
+        }
+      })
+    })
+  });
+
+  assert.equal(provider.windows[0].usedPercent, 1);
+  assert.equal(provider.windows[0].remainingPercent, 99);
+  assert.equal(provider.windows[1].usedPercent, 0);
+  assert.equal(provider.windows[1].remainingPercent, 100);
+});
+
+test('Claude limits on macOS prefer CLI usage when OAuth reports an exhausted session', async () => {
+  const provider = await fetchClaudeLimits({}, {
+    platform: 'darwin',
+    now: () => Date.parse('2026-06-11T00:00:00Z'),
+    claudeCredentialPath: '/tmp/claude-credentials.json',
+    stat: async () => ({ mtimeMs: 1 }),
+    readFile: async () => JSON.stringify({
+      claudeAiOauth: {
+        accessToken: 'access-token',
+        expiresAt: Date.parse('2026-06-12T00:00:00Z')
+      }
+    }),
+    fetch: async () => ({
+      ok: true,
+      json: async () => ({
+        fiveHour: {
+          utilization: 100,
+          resetsAt: '2026-06-11T08:00:00Z'
+        },
+        sevenDay: {
+          utilization: 0,
+          resetsAt: '2026-06-18T10:00:00Z'
+        }
+      })
+    }),
+    runClaudeUsageCli: async () => [
+      'Current session',
+      '1% used',
+      'Resets 3:59pm',
+      'Current week',
+      '0% used',
+      'Resets Jun 19'
+    ].join('\n')
+  });
+
+  assert.equal(provider.source, 'cli');
+  assert.equal(provider.windows[0].usedPercent, 1);
+  assert.equal(provider.windows[0].remainingPercent, 99);
+  assert.equal(provider.windows[1].usedPercent, 0);
+  assert.equal(provider.windows[1].remainingPercent, 100);
+});
+
+test('Claude macOS CLI replacement preserves OAuth plan label', async () => {
+  const provider = await fetchClaudeLimits({}, {
+    platform: 'darwin',
+    now: () => Date.parse('2026-06-11T00:00:00Z'),
+    claudeCredentialPath: '/tmp/claude-credentials.json',
+    stat: async () => ({ mtimeMs: 1 }),
+    readFile: async () => JSON.stringify({
+      claudeAiOauth: {
+        accessToken: 'access-token',
+        expiresAt: Date.parse('2026-06-12T00:00:00Z'),
+        subscriptionType: 'max',
+        rateLimitTier: 'default_claude_max_5x'
+      }
+    }),
+    fetch: async () => ({
+      ok: true,
+      json: async () => ({
+        fiveHour: {
+          utilization: 100,
+          resetsAt: '2026-06-11T08:00:00Z'
+        },
+        sevenDay: {
+          utilization: 0,
+          resetsAt: '2026-06-18T10:00:00Z'
+        }
+      })
+    }),
+    runClaudeUsageCli: async () => [
+      'Current session',
+      '1% used',
+      'Resets 3:59pm',
+      'Current week',
+      '0% used',
+      'Resets Jun 19'
+    ].join('\n')
+  });
+
+  assert.equal(provider.source, 'cli');
+  assert.equal(provider.accountLabel, 'Max 5x');
+  assert.equal(provider.windows[0].remainingPercent, 99);
+});
+
+test('Claude CLI usage parses compact PTY reset lines', () => {
+  const provider = mapClaudeCliUsageToProvider([
+    'Current session',
+    '1% used',
+    'Resets4pm(Asia/Hong_Kong)',
+    'Current week (all models)',
+    '0% used',
+    'ResetsJun19at6pm(Asia/Hong_Kong)'
+  ].join('\n'), {
+    now: new Date('2026-06-13T07:00:00Z'),
+    updatedAt: '2026-06-13T07:00:00Z'
+  });
+
+  const session = provider.windows.find((window) => window.kind === 'session');
+  const weekly = provider.windows.find((window) => window.kind === 'weekly');
+  assert.equal(session.resetDescription, 'Resets 4pm');
+  assert.equal(weekly.resetDescription, 'Resets Jun 19 at 6pm');
+  assert.equal(typeof session.resetsAt, 'string');
+  assert.equal(typeof weekly.resetsAt, 'string');
+});
+
+test('Claude CLI usage maps out-of-order PTY reset lines by window shape', () => {
+  const provider = mapClaudeCliUsageToProvider([
+    'Current session',
+    '1% used',
+    'Current week (all models)',
+    '0% used',
+    'Resets4pm(Asia/Hong_Kong)',
+    'ResetsJun19at6pm(Asia/Hong_Kong)'
+  ].join('\n'), {
+    now: new Date('2026-06-13T07:00:00Z'),
+    updatedAt: '2026-06-13T07:00:00Z'
+  });
+
+  const session = provider.windows.find((window) => window.kind === 'session');
+  const weekly = provider.windows.find((window) => window.kind === 'weekly');
+  assert.equal(session.resetDescription, 'Resets 4pm');
+  assert.equal(weekly.resetDescription, 'Resets Jun 19 at 6pm');
+  assert.equal(typeof session.resetsAt, 'string');
+  assert.equal(typeof weekly.resetsAt, 'string');
+});
+
+test('Claude command candidates include common Windows CLI install paths before generic commands', () => {
+  const localAppData = 'C:\\Users\\Javis\\AppData\\Local';
+  const appData = 'C:\\Users\\Javis\\AppData\\Roaming';
+  const userProfile = 'C:\\Users\\Javis';
+
+  const candidates = claudeCommandCandidates({
+    LOCALAPPDATA: localAppData,
+    APPDATA: appData,
+    USERPROFILE: userProfile
+  }, 'win32');
+
+  const localNpm = 'C:\\Users\\Javis\\AppData\\Local\\npm\\claude.cmd';
+  const roamingNpm = 'C:\\Users\\Javis\\AppData\\Roaming\\npm\\claude.cmd';
+  const volta = 'C:\\Users\\Javis\\AppData\\Local\\Volta\\tools\\image\\packages\\@anthropic-ai\\claude-code\\bin\\claude.cmd';
+  const fnm = 'C:\\Users\\Javis\\AppData\\Local\\fnm_multishells\\claude.cmd';
+
+  assert.equal(candidates.includes(localNpm), true);
+  assert.equal(candidates.includes(roamingNpm), true);
+  assert.equal(candidates.includes(volta), true);
+  assert.equal(candidates.includes(fnm), true);
+  assert.ok(candidates.indexOf(roamingNpm) < candidates.indexOf('claude.cmd'));
+  assert.ok(candidates.indexOf('claude.cmd') < candidates.indexOf('claude'));
 });

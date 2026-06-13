@@ -269,6 +269,20 @@ function extractClaudeOauth(credentials) {
   return credentials?.claudeAiOauth || credentials?.oauth || credentials || null;
 }
 
+function claudeCredentialsFromOauth(oauth, meta = {}) {
+  if (!oauth?.accessToken) return null;
+  return {
+    source: meta.source || '',
+    filePath: meta.filePath,
+    fileShape: meta.fileShape,
+    accessToken: String(oauth.accessToken),
+    refreshToken: oauth.refreshToken ? String(oauth.refreshToken) : null,
+    expiresAt: normalizeExpiresAt(oauth.expiresAt),
+    identity: meta.identity || `${meta.source || 'claude'}:${oauth.subscriptionType || ''}:${oauth.rateLimitTier || ''}`,
+    accountLabel: claudePlanLabelFromParts(oauth.subscriptionType, oauth.rateLimitTier)
+  };
+}
+
 async function readClaudeCredentials(deps = {}) {
   const env = deps.env || process.env;
   if (env.CLAUDE_CODE_OAUTH_TOKEN) {
@@ -287,20 +301,29 @@ async function readClaudeCredentials(deps = {}) {
       const raw = await readJsonFile(candidate.path, deps);
       const fileShape = raw && typeof raw === 'object' && raw.claudeAiOauth ? 'claudeAiOauth' : 'root';
       const oauth = extractClaudeOauth(raw);
-      if (oauth?.accessToken) {
-        return {
-          source: 'file',
-          filePath: candidate.path,
-          fileShape,
-          accessToken: String(oauth.accessToken),
-          refreshToken: oauth.refreshToken ? String(oauth.refreshToken) : null,
-          expiresAt: normalizeExpiresAt(oauth.expiresAt),
-          identity: `path:${candidate.identityLabel}:${oauth.subscriptionType || ''}:${oauth.rateLimitTier || ''}`,
-          accountLabel: claudePlanLabelFromParts(oauth.subscriptionType, oauth.rateLimitTier)
-        };
-      }
+      const credentials = claudeCredentialsFromOauth(oauth, {
+        source: 'file',
+        filePath: candidate.path,
+        fileShape,
+        identity: `path:${candidate.identityLabel}:${oauth?.subscriptionType || ''}:${oauth?.rateLimitTier || ''}`
+      });
+      if (credentials) return credentials;
     } catch (error) {
       if (error.code !== 'ENOENT') continue;
+    }
+  }
+
+  if ((deps.platform || process.platform) === 'win32' && deps.readWindowsCredential !== false) {
+    const text = await readWindowsClaudeCredentials(deps).catch(() => '');
+    if (text) {
+      try {
+        const oauth = extractClaudeOauth(JSON.parse(text));
+        const credentials = claudeCredentialsFromOauth(oauth, {
+          source: 'wincred',
+          identity: `wincred:Claude Code-credentials:${oauth?.subscriptionType || ''}:${oauth?.rateLimitTier || ''}`
+        });
+        if (credentials) return credentials;
+      } catch (_) {}
     }
   }
 
@@ -308,20 +331,108 @@ async function readClaudeCredentials(deps = {}) {
     const text = await readMacKeychainSecret('Claude Code-credentials', deps).catch(() => '');
     if (text) {
       const oauth = extractClaudeOauth(JSON.parse(text));
-      if (oauth?.accessToken) {
-        return {
-          source: 'keychain',
-          accessToken: String(oauth.accessToken),
-          refreshToken: oauth.refreshToken ? String(oauth.refreshToken) : null,
-          expiresAt: normalizeExpiresAt(oauth.expiresAt),
-          identity: `keychain:Claude Code-credentials:${oauth.subscriptionType || ''}:${oauth.rateLimitTier || ''}`,
-          accountLabel: claudePlanLabelFromParts(oauth.subscriptionType, oauth.rateLimitTier)
-        };
-      }
+      const credentials = claudeCredentialsFromOauth(oauth, {
+        source: 'keychain',
+        identity: `keychain:Claude Code-credentials:${oauth?.subscriptionType || ''}:${oauth?.rateLimitTier || ''}`
+      });
+      if (credentials) return credentials;
     }
   }
 
   throw errorWithStatus('notConfigured', 'Claude credentials not found');
+}
+
+function windowsCredentialTargetCandidates(service, env = process.env) {
+  const candidates = [service];
+  for (const key of ['USER', 'USERNAME']) {
+    const value = envValue(env, key);
+    if (!value) continue;
+    candidates.push(`${service}:${value}`, `${service}/${value}`);
+  }
+  return uniqueStrings(candidates);
+}
+
+async function readWindowsClaudeCredentials(deps = {}) {
+  const service = 'Claude Code-credentials';
+  const targets = windowsCredentialTargetCandidates(service, deps.env || process.env);
+  if (deps.readWindowsCredentialSecret) return deps.readWindowsCredentialSecret(service, targets);
+  return readWindowsCredentialSecret(service, targets, deps);
+}
+
+let winCredApi = null;
+
+function loadWinCredApi(deps = {}) {
+  if (deps.winCredApi) return deps.winCredApi;
+  if (winCredApi !== null) return winCredApi;
+  try {
+    const koffi = deps.koffi || require('koffi');
+    const advapi32 = koffi.load('advapi32.dll');
+    const FILETIME = koffi.struct('FILETIME', {
+      dwLowDateTime: 'uint32_t',
+      dwHighDateTime: 'uint32_t'
+    });
+    const CREDENTIALW = koffi.struct('CREDENTIALW', {
+      Flags: 'uint32_t',
+      Type: 'uint32_t',
+      TargetName: 'str16',
+      Comment: 'str16',
+      LastWritten: FILETIME,
+      CredentialBlobSize: 'uint32_t',
+      CredentialBlob: 'void *',
+      Persist: 'uint32_t',
+      AttributeCount: 'uint32_t',
+      Attributes: 'void *',
+      TargetAlias: 'str16',
+      UserName: 'str16'
+    });
+    winCredApi = {
+      koffi,
+      CREDENTIALW,
+      CredReadW: advapi32.func('bool CredReadW(const char16_t *TargetName, uint32_t Type, uint32_t Flags, _Out_ CREDENTIALW **Credential)'),
+      CredFree: advapi32.func('void CredFree(void *Buffer)')
+    };
+  } catch (_) {
+    winCredApi = false;
+  }
+  return winCredApi;
+}
+
+function decodeWindowsCredentialBlob(api, pointer, size) {
+  if (!pointer || !size) return '';
+  let buffer;
+  try {
+    buffer = Buffer.from(new Uint8Array(api.koffi.view(pointer, size)));
+  } catch (_) {
+    buffer = Buffer.from(api.koffi.decode(pointer, 'uint8_t', size));
+  }
+  const utf8 = buffer.toString('utf8').replace(/\0+$/g, '').trim();
+  const utf16 = size % 2 === 0 ? buffer.toString('utf16le').replace(/\0+$/g, '').trim() : '';
+  if (/^\s*[{[]/.test(utf8) || utf8.includes('accessToken')) return utf8;
+  if (/^\s*[{[]/.test(utf16) || utf16.includes('accessToken')) return utf16;
+  return utf8 || utf16;
+}
+
+function readWindowsCredentialSecret(_service, targets, deps = {}) {
+  if ((deps.platform || process.platform) !== 'win32') return '';
+  const api = loadWinCredApi(deps);
+  if (!api) return '';
+  const CRED_TYPE_GENERIC = 1;
+  for (const target of targets) {
+    const out = [null];
+    try {
+      if (!api.CredReadW(target, CRED_TYPE_GENERIC, 0, out) || !out[0]) continue;
+      const credential = api.koffi.decode(out[0], api.CREDENTIALW);
+      const text = decodeWindowsCredentialBlob(api, credential.CredentialBlob, credential.CredentialBlobSize);
+      if (text) return text;
+    } catch (_) {
+      // Try the next target name; WinCred is a best-effort source.
+    } finally {
+      if (out[0]) {
+        try { api.CredFree(out[0]); } catch (_) {}
+      }
+    }
+  }
+  return '';
 }
 
 function readMacKeychainSecret(service, deps = {}) {
@@ -395,20 +506,44 @@ async function fetchJson(url, headers, deps = {}) {
   }
 }
 
+function valueFromAliases(object, aliases) {
+  if (!object || typeof object !== 'object') return undefined;
+  for (const alias of aliases) {
+    if (object[alias] !== undefined && object[alias] !== null) return object[alias];
+  }
+  return undefined;
+}
+
+function normalizeClaudeUtilization(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return value;
+  if (number > 0 && number <= 1) return number * 100;
+  return number;
+}
+
+function claudeUsageWindowUsedPercent(window) {
+  const explicit = valueFromAliases(window, ['usedPercent', 'used_percent']);
+  if (explicit !== undefined) return explicit;
+  const utilization = valueFromAliases(window, ['utilization', 'percent']);
+  return utilization === undefined ? undefined : normalizeClaudeUtilization(utilization);
+}
+
 function mapClaudeUsageToProvider(usage, meta = {}) {
   const windows = [];
-  if (usage?.five_hour) {
+  const session = valueFromAliases(usage, ['five_hour', 'fiveHour']);
+  const weekly = valueFromAliases(usage, ['seven_day', 'sevenDay']);
+  if (session) {
     windows.push({
       kind: 'session',
-      usedPercent: usage.five_hour.utilization,
-      resetsAt: usage.five_hour.resets_at
+      usedPercent: claudeUsageWindowUsedPercent(session),
+      resetsAt: valueFromAliases(session, ['resets_at', 'resetsAt'])
     });
   }
-  if (usage?.seven_day) {
+  if (weekly) {
     windows.push({
       kind: 'weekly',
-      usedPercent: usage.seven_day.utilization,
-      resetsAt: usage.seven_day.resets_at
+      usedPercent: claudeUsageWindowUsedPercent(weekly),
+      resetsAt: valueFromAliases(weekly, ['resets_at', 'resetsAt'])
     });
   }
   return normalizeLimitProvider({
@@ -420,6 +555,34 @@ function mapClaudeUsageToProvider(usage, meta = {}) {
     updatedAt: meta.updatedAt,
     windows
   });
+}
+
+function shouldPreferClaudeCliForOauth(provider, platform = process.platform) {
+  if (platform !== 'darwin') return false;
+  const session = provider?.windows?.find((window) => window.kind === 'session');
+  if (!session) return false;
+  const remaining = Number(session.remainingPercent);
+  const used = Number(session.usedPercent);
+  if (Number.isFinite(remaining)) return remaining <= 1;
+  return Number.isFinite(used) && used >= 99;
+}
+
+async function maybeUseClaudeCliInsteadOfOauth(oauthProvider, platform, nowMs, deps = {}) {
+  if (!shouldPreferClaudeCliForOauth(oauthProvider, platform)) return oauthProvider;
+  try {
+    const text = await runClaudeUsageCli(deps);
+    const cliProvider = mapClaudeCliUsageToProvider(text, {
+      updatedAt: nowIso(nowMs),
+      now: new Date(nowMs)
+    });
+    return normalizeLimitProvider({
+      ...cliProvider,
+      accountKey: oauthProvider?.accountKey || cliProvider.accountKey,
+      accountLabel: oauthProvider?.accountLabel || cliProvider.accountLabel
+    });
+  } catch (_) {
+    return oauthProvider;
+  }
 }
 
 async function refreshClaudeAccessToken(refreshToken, deps = {}) {
@@ -553,12 +716,13 @@ async function fetchClaudeLimits(options = {}, deps = {}) {
       usage = await callClaudeUsage(credentials.accessToken, deps);
     }
 
-    return mapClaudeUsageToProvider(usage, {
+    const provider = mapClaudeUsageToProvider(usage, {
       accountKey: hashKey('claude', credentials.identity),
       accountLabel: credentials.accountLabel,
       updatedAt: nowIso(nowMs),
       source: 'oauth'
     });
+    return maybeUseClaudeCliInsteadOfOauth(provider, platform, nowMs, deps);
   } catch (error) {
     if (!shouldTryClaudeCliFallback(error)) throw error;
     try {
@@ -610,7 +774,15 @@ function extractClaudePercent(lines, label) {
 function cleanClaudeResetLine(line) {
   const match = String(line || '').match(/resets[^\r\n]*/i);
   if (!match) return '';
-  return match[0].replace(/[)\s]+$/g, '').trim();
+  return match[0]
+    .replace(/\([^)]*\)?/g, '')
+    .replace(/^(resets?)(?=\d|[a-z])/i, '$1 ')
+    .replace(/\b(jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)(\d{1,2})/ig, '$1 $2')
+    .replace(/(\d{1,2})(at)(\d{1,2})/ig, '$1 $2 $3')
+    .replace(/([a-z])(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/ig, '$1 $2$3$4')
+    .replace(/[)\s]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function extractClaudeReset(lines, label) {
@@ -628,6 +800,10 @@ function extractClaudeReset(lines, label) {
   return '';
 }
 
+function allClaudeResetLines(lines) {
+  return uniqueStrings(lines.map(cleanClaudeResetLine).filter(Boolean));
+}
+
 const MONTHS = {
   jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
   jul: 6, aug: 7, sep: 8, sept: 8, oct: 9, nov: 10, dec: 11
@@ -640,6 +816,18 @@ function parseClock(hourText, minuteText, meridiem) {
   if (suffix === 'pm' && hour < 12) hour += 12;
   if (suffix === 'am' && hour === 12) hour = 0;
   return { hour, minute };
+}
+
+function claudeResetShape(text) {
+  let raw = String(text || '').trim();
+  raw = raw.replace(/^resets?:?\s*/i, '')
+    .replace(/\([^)]*\)/g, '')
+    .replace(/\bat\b/ig, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (/^\d{1,2}(?::\d{2})?\s*(am|pm)$/i.test(raw)) return 'time';
+  if (/^[a-z]{3,4}\s+\d{1,2}(?:,?\s+\d{1,2}(?::\d{2})?\s*(am|pm)?)?$/i.test(raw)) return 'date';
+  return '';
 }
 
 function parseClaudeResetDate(text, now = new Date()) {
@@ -684,8 +872,15 @@ function parseClaudeCliUsageText(text, now = new Date()) {
   const lines = clean.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const sessionPercentLeft = extractClaudePercent(lines, 'Current session');
   const weeklyPercentLeft = extractClaudePercent(lines, 'Current week');
-  const primaryResetDescription = extractClaudeReset(lines, 'Current session');
-  const secondaryResetDescription = extractClaudeReset(lines, 'Current week');
+  const resetLines = allClaudeResetLines(lines);
+  let primaryResetDescription = extractClaudeReset(lines, 'Current session');
+  let secondaryResetDescription = extractClaudeReset(lines, 'Current week');
+  const sessionReset = resetLines.find((line) => claudeResetShape(line) === 'time') || '';
+  const weeklyReset = resetLines.find((line) => claudeResetShape(line) === 'date') || '';
+  if (!primaryResetDescription && sessionReset) primaryResetDescription = sessionReset;
+  if (!secondaryResetDescription || (weeklyReset && claudeResetShape(secondaryResetDescription) === 'time')) {
+    secondaryResetDescription = weeklyReset || secondaryResetDescription;
+  }
   const accountEmail = (clean.match(/(?:Account|Email):\s*([^\s@]+@[^\s@]+)/i) || [])[1] || '';
   const accountOrganization = ((clean.match(/(?:Org|Organization):\s*(.+)/i) || [])[1] || '').trim();
   const accountLabel = planLabelFromParts((clean.match(/(?:Plan|Subscription):\s*([A-Za-z][A-Za-z0-9 _-]{0,30})/i) || [])[1] || '');
@@ -730,9 +925,75 @@ function mapClaudeCliUsageToProvider(text, meta = {}) {
   });
 }
 
-function claudeCommandCandidates(env = process.env) {
+function claudeCommandCandidates(env = process.env, platform = process.platform) {
   if (env.TOKEN_MONITOR_CLAUDE_COMMAND) return [env.TOKEN_MONITOR_CLAUDE_COMMAND];
-  return ['claude'];
+  const candidates = [];
+  const pathApi = pathApiForPlatform(platform);
+  if (platform === 'win32') {
+    const localAppData = envValue(env, 'LOCALAPPDATA');
+    const appData = envValue(env, 'APPDATA');
+    const userProfile = envValue(env, 'USERPROFILE');
+    if (localAppData) {
+      candidates.push(
+        pathApi.join(localAppData, 'Programs', 'claude', 'claude.exe'),
+        pathApi.join(localAppData, 'npm', 'claude.cmd'),
+        pathApi.join(localAppData, 'Volta', 'tools', 'image', 'packages', '@anthropic-ai', 'claude-code', 'bin', 'claude.cmd'),
+        pathApi.join(localAppData, 'fnm_multishells', 'claude.cmd')
+      );
+    }
+    if (appData) candidates.push(pathApi.join(appData, 'npm', 'claude.cmd'));
+    if (userProfile) candidates.push(pathApi.join(userProfile, '.npm-global', 'claude.cmd'));
+    candidates.push('claude.cmd', 'claude.exe');
+  } else {
+    if (env.HOME) {
+      candidates.push(
+        path.join(env.HOME, '.npm-global', 'bin', 'claude'),
+        path.join(env.HOME, '.local', 'bin', 'claude')
+      );
+    }
+    candidates.push('/opt/homebrew/bin/claude', '/usr/local/bin/claude', '/usr/bin/claude');
+  }
+  candidates.push('claude');
+  return uniqueStrings(candidates);
+}
+
+function existingClaudeCommandCandidates(candidates, deps = {}) {
+  const existsSync = deps.existsSync || fs.existsSync;
+  const pathApi = pathApiForPlatform(deps.platform || process.platform);
+  return candidates.filter((candidate) => {
+    if (!pathApi.isAbsolute(candidate)) return true;
+    return existsSync(candidate);
+  });
+}
+
+function withClaudePathHints(env = process.env, platform = process.platform) {
+  const delimiter = pathDelimiterForPlatform(platform);
+  const pathKey = Object.keys(env).find((key) => key.toLowerCase() === 'path') || 'PATH';
+  const currentPath = env[pathKey] || '';
+  const pathApi = pathApiForPlatform(platform);
+  const hints = [];
+  if (platform === 'win32') {
+    const localAppData = envValue(env, 'LOCALAPPDATA');
+    const appData = envValue(env, 'APPDATA');
+    const userProfile = envValue(env, 'USERPROFILE');
+    if (localAppData) {
+      hints.push(
+        pathApi.join(localAppData, 'Programs', 'claude'),
+        pathApi.join(localAppData, 'npm'),
+        pathApi.join(localAppData, 'Volta', 'tools', 'image', 'packages', '@anthropic-ai', 'claude-code', 'bin'),
+        pathApi.join(localAppData, 'fnm_multishells')
+      );
+    }
+    if (appData) hints.push(pathApi.join(appData, 'npm'));
+    if (userProfile) hints.push(pathApi.join(userProfile, '.npm-global'));
+  } else {
+    hints.push('/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin');
+    if (env.HOME) hints.push(path.join(env.HOME, '.npm-global', 'bin'), path.join(env.HOME, '.local', 'bin'));
+  }
+  return {
+    ...env,
+    [pathKey]: uniqueStrings([...hints, ...currentPath.split(delimiter)]).join(delimiter)
+  };
 }
 
 function claudePtyPythonScript() {
@@ -806,7 +1067,9 @@ async function runClaudePtyProbe(slashCommand, exitMarkerRegex, deps = {}) {
     throw errorWithStatus('unavailable', 'Claude CLI PTY probe is not available on Windows yet');
   }
   const env = deps.env || process.env;
-  const command = claudeCommandCandidates(env)[0];
+  const platform = deps.platform || process.platform;
+  const command = existingClaudeCommandCandidates(claudeCommandCandidates(env, platform), deps)[0];
+  if (!command) throw errorWithStatus('notConfigured', 'Claude CLI not found');
   const probeDir = deps.claudeProbeDir || path.join(os.tmpdir(), 'token-monitor-claude-probe');
   fs.mkdirSync(probeDir, { recursive: true });
   const runEnv = {
@@ -843,9 +1106,12 @@ async function runClaudeUsageCli(deps = {}) {
 
 function runClaudeDirectUsageCli(deps = {}) {
   const platform = deps.platform || process.platform;
-  const command = claudeCommandCandidates(deps.env || process.env)[0];
+  const env = deps.env || process.env;
+  const command = existingClaudeCommandCandidates(claudeCommandCandidates(env, platform), deps)[0];
+  if (!command) throw errorWithStatus('notConfigured', 'Claude CLI not found');
   return runProcessText(command, ['/usage'], {
     ...deps,
+    env: withClaudePathHints(env, platform),
     shell: platform === 'win32',
     timeoutMs: Number(deps.claudeDirectCliTimeoutMs || 12000)
   });
@@ -1695,6 +1961,7 @@ async function fetchCursorLimits(options = {}, deps = {}) {
 
 module.exports = {
   collectLimitsOnce,
+  claudeCommandCandidates,
   codexCommandCandidates,
   codexCommandSourceDetail,
   createLimitsCollector,
