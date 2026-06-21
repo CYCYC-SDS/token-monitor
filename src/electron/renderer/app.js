@@ -161,7 +161,7 @@ let viewSwitcherLongPressTimer = null;
 let viewSwitcherLongPressTriggered = false;
 let viewSwitcherHoverCloseTimer = null;
 const els = {
-  shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), totalTokens: document.getElementById('totalTokens'), cost: document.getElementById('cost'), cacheRate: document.getElementById('cacheRate'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), limitProviderCheckboxes: document.getElementById('limitProviderCheckboxes'), limitsRefreshInput: document.getElementById('limitsRefreshInput'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), showActiveAccountInput: document.getElementById('showActiveAccountInput'), systemGlassInput: document.getElementById('systemGlassInput'), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInput: document.getElementById('floatingBubbleTriggerInput'), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), showTrayIconInput: document.getElementById('showTrayIconInput'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutRecordButton: document.getElementById('windowToggleShortcutRecordButton'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), openConfigButton: document.getElementById('openConfigButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab')
+  shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), totalTokens: document.getElementById('totalTokens'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), limitProviderCheckboxes: document.getElementById('limitProviderCheckboxes'), limitsRefreshInput: document.getElementById('limitsRefreshInput'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), showActiveAccountInput: document.getElementById('showActiveAccountInput'), systemGlassInput: document.getElementById('systemGlassInput'), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInput: document.getElementById('floatingBubbleTriggerInput'), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), showTrayIconInput: document.getElementById('showTrayIconInput'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutRecordButton: document.getElementById('windowToggleShortcutRecordButton'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), openConfigButton: document.getElementById('openConfigButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab')
 };
 Object.assign(els, {
   floatingBubbleOptions: document.getElementById('floatingBubbleOptions'),
@@ -986,11 +986,8 @@ function formatMoney(value, currency) {
   return `${symbol}${number.toFixed(2)}`;
 }
 
-function formatLimitWindowValue(window, fillPercent, hasPercent, showRemaining = true) {
-  if (hasPercent) {
-    const label = showRemaining ? 'left' : 'used';
-    return `${formatPercent(fillPercent)} ${label}`;
-  }
+function formatLimitWindowValue(window, fillPercent, hasPercent) {
+  if (hasPercent) return `${formatPercent(fillPercent)} left`;
   if (!window) return '--';
   const remaining = Number(window?.remaining);
   if (Number.isFinite(remaining)) {
@@ -1009,14 +1006,16 @@ function balanceRemainingWindow(balance) {
   return { remainingPercent };
 }
 
-function limitWindowNode(label, window, color, tone = 1, valueOverride = null, showRemaining = true) {
+function limitWindowNode(label, window, color, tone = 1, valueOverride = null) {
   const remaining = Number(window?.remainingPercent);
   const used = Number(window?.usedPercent);
   const showMeter = window?.showMeter !== false;
   const hasPercent = showMeter && (Number.isFinite(remaining) || Number.isFinite(used));
-  const fillPercent = showRemaining
-    ? (Number.isFinite(remaining) ? remaining : Number.isFinite(used) ? 100 - used : 0)
-    : (Number.isFinite(used) ? used : Number.isFinite(remaining) ? 100 - remaining : 0);
+  const fillPercent = Number.isFinite(remaining)
+    ? remaining
+    : Number.isFinite(used)
+      ? 100 - used
+      : 0;
   const safePercent = Math.max(0, Math.min(100, fillPercent));
   const item = document.createElement('div');
   item.className = 'limit-window';
@@ -1025,7 +1024,7 @@ function limitWindowNode(label, window, color, tone = 1, valueOverride = null, s
   const name = document.createElement('span');
   name.textContent = window?.label || label;
   const value = document.createElement('span');
-  value.textContent = valueOverride != null ? valueOverride : formatLimitWindowValue(window, fillPercent, hasPercent, showRemaining);
+  value.textContent = valueOverride != null ? valueOverride : formatLimitWindowValue(window, fillPercent, hasPercent);
   text.append(name, value);
   const meter = document.createElement('div');
   meter.className = 'limit-meter';
@@ -1148,11 +1147,11 @@ function renderProviderWindows(provider, color) {
     const session = windowForKind(provider, 'session');
     const weekly = windowForKind(provider, 'weekly');
     const monthly = windowForKind(provider, 'billing');
-    if (session) windows.append(limitWindowNode('Session', session, color, 0.95, null, false));
-    if (weekly) windows.append(limitWindowNode('Weekly', weekly, color, 0.68, null, false));
+    if (session) windows.append(limitWindowNode('Session', session, color, 0.95));
+    if (weekly) windows.append(limitWindowNode('Weekly', weekly, color, 0.68));
     // Monthly spans the full row (like Balance) so it never leaves a half-empty grid cell.
     if (monthly) {
-      const node = limitWindowNode('Monthly', monthly, color, 0.5, null, false);
+      const node = limitWindowNode('Monthly', monthly, color, 0.5);
       node.classList.add('limit-window-wide');
       windows.append(node);
     }
@@ -2158,22 +2157,6 @@ function render() {
   }
   state.currentTotal = nextTotal;
   els.cost.textContent = formatCost(period.costUsd || 0);
-  // Cache hit rate = cacheRead / input  (input 是总输入，已含 cacheRead)
-  const cacheReadVal = period.cacheReadTokens || 0;
-  const outputTokensVal = period.outputTokens || 0;
-  const inputTotal = nextTotal - outputTokensVal; // 总 input（含 cacheRead）
-  if (cacheReadVal > 0 && inputTotal > 0) {
-    const hitPct = Math.round((cacheReadVal / inputTotal) * 100);
-    els.cacheRate.textContent = '⚡ Cache hit: ' + hitPct + '%';
-    els.cacheRate.classList.remove('hidden');
-    const r = Math.round(255 * (1 - hitPct / 100) * 2);
-    const g = Math.round(255 * (hitPct / 100) * 1.5);
-    const color = hitPct >= 90 ? '#4ade80' : `rgb(${Math.min(255, r)}, ${Math.min(255, g)}, 80)`;
-    els.cacheRate.style.color = color;
-    els.cacheRate.style.textShadow = hitPct >= 90 ? '0 0 8px rgba(74, 222, 128, 0.4)' : 'none';
-  } else {
-    els.cacheRate.classList.add('hidden');
-  }
   if (!state.refreshBusy && !state.refreshFeedbackTimer) setRefreshButtonState('idle');
   els.shell.classList.toggle('session-mode', state.breakdown === 'session');
   els.shell.classList.toggle('home-mode', state.breakdown === 'home');
@@ -4691,16 +4674,19 @@ function renderOpenCodeProfiles() {
     if (entries.length === 0 && !hasEnvVar) {
       listEl.innerHTML = '<div class="opencode-empty">' + t('settings.opencode.emptyList') + '</div>';
       state.opencodeProfileCount = 0;
+      renderSettingsSummaries();
       return;
     }
 
     state.opencodeProfileCount = entries.length;
+    renderSettingsSummaries();
 
     for (const [name, profile] of entries) {
       const item = document.createElement('div');
       item.className = 'opencode-profile-item';
 
       const toggle = document.createElement('input');
+      toggle.className = 'profile-toggle';
       toggle.type = 'checkbox';
       toggle.checked = profile.enabled;
       toggle.addEventListener('change', () => {
@@ -4708,6 +4694,9 @@ function renderOpenCodeProfiles() {
           const info = item.querySelector('.profile-info');
           info.textContent = toggle.checked ? '...' : t('settings.opencode.disabled');
           renderSettingsSummaries();
+          // Enabling adds the profile to the status query; refresh so the row
+          // resolves from the loading placeholder instead of sticking on '...'.
+          if (toggle.checked) updateOpenCodeProfilesStatus();
         });
       });
 
@@ -4770,13 +4759,19 @@ function renderOpenCodeProfiles() {
       deleteBtn.className = 'profile-delete';
       deleteBtn.textContent = '✕';
       deleteBtn.title = t('settings.opencode.delete');
+      let confirmingDelete = false;
       deleteBtn.addEventListener('click', async () => {
-        if (confirm(t('settings.opencode.deleteConfirm', { name }))) {
-          await api.deleteProfile(name);
-          renderOpenCodeProfiles();
-          updateOpenCodeProfilesStatus();
-          renderSettingsSummaries();
+        if (!confirmingDelete) {
+          confirmingDelete = true;
+          deleteBtn.classList.add('confirming');
+          deleteBtn.textContent = '✓';
+          deleteBtn.title = t('settings.opencode.deleteConfirm', { name });
+          return;
         }
+        await api.deleteProfile(name);
+        renderOpenCodeProfiles();
+        updateOpenCodeProfilesStatus();
+        renderSettingsSummaries();
       });
 
       rightBox.append(infoSpan, deleteBtn);
@@ -4786,7 +4781,9 @@ function renderOpenCodeProfiles() {
 
     updateOpenCodeProfilesStatus();
   });
-}async function updateOpenCodeProfilesStatus() {
+}
+
+async function updateOpenCodeProfilesStatus() {
   const api = window.tokenMonitor.opencode;
   const status = await api.status();
   const profiles = status.profiles || {};
@@ -5211,6 +5208,16 @@ function setupCursorAccountUI() {
       setOpencodeCookieExpanded(expanding);
       if (expanding) renderOpenCodeProfiles();
     });
+
+    const addToggle = document.getElementById('opencodeAddToggle');
+    const addDetails = document.getElementById('opencodeAddDetails');
+    function setOpenCodeAddExpanded(expanded) {
+      const next = Boolean(expanded);
+      addToggle?.setAttribute('aria-expanded', next ? 'true' : 'false');
+      addDetails?.classList.toggle('hidden', !next);
+      document.getElementById('opencodeAddForm')?.classList.toggle('expanded', next);
+    }
+    addToggle?.addEventListener('click', () => setOpenCodeAddExpanded(addDetails?.classList.contains('hidden')));
 
     document.getElementById('opencodeCookieSubmit').addEventListener('click', async () => {
       const input = document.getElementById('opencodeCookieInput');

@@ -2524,14 +2524,20 @@ app.whenReady().then(() => {
 
     const result = Object.fromEntries(results);
 
-    // 传统 env cookie
+    // Legacy env cookie. Skip it when it matches an enabled profile so the
+    // panel doesn't report an extra "connected" account that the collector
+    // dedupes away (otherwise it shows 2/2 while only one account is tracked).
     const envCookie = process.env.TOKEN_MONITOR_OPENCODE_COOKIE || '';
-    if (envCookie) {
+    if (envCookie && !entries.some(([, p]) => p.cookie === envCookie)) {
       const [go, zen] = await Promise.all([
         opencodeWeb.fetchGoWeb(envCookie, {}),
         opencodeWeb.fetchZen(envCookie, {})
       ]);
-      result['env'] = { ...opencodeWeb.summarizeLink(go, zen), balanceUsd: zen.balanceUsd, env: true };
+      let envKey = 'env';
+      for (let i = 1; Object.prototype.hasOwnProperty.call(profiles, envKey); i += 1) {
+        envKey = `env:${i}`;
+      }
+      result[envKey] = { ...opencodeWeb.summarizeLink(go, zen), balanceUsd: zen.balanceUsd, env: true };
     }
     const value = { profiles: result, linked: Object.values(result).some(s => s.linked) };
     opencodeStatusCache = { value, at: now };

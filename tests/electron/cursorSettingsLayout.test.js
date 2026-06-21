@@ -87,11 +87,13 @@ test('OpenCode account panel provides multi-profile management', () => {
   const html = readRendererFile('index.html');
   const details = html.match(/<div id="opencodeSettingsDetails"[\s\S]*?<div id="opencodeErrorMessage" class="settings-note error hidden"><\/div>/)?.[0] || '';
   assert.match(details, /<div id="opencodeProfileList" class="opencode-profile-list"><\/div>/);
-  assert.match(details, /<details id="opencodeAddForm" class="opencode-add-form">/);
+  assert.match(details, /<div id="opencodeAddForm" class="opencode-add-form">/);
+  assert.match(details, /<button id="opencodeAddToggle" class="opencode-add-summary" type="button" aria-expanded="false" aria-controls="opencodeAddDetails">/);
+  assert.match(details, /<div id="opencodeAddDetails" class="opencode-add-details accordion-animated-container hidden">/);
   assert.match(details, /<span data-i18n="settings\.opencode\.addProfile"/);
   assert.match(details, /<input id="opencodeProfileName" type="text"[\s\S]*data-i18n-placeholder="settings\.opencode\.profileNamePlaceholder"/);
   assert.match(details, /<textarea id="opencodeCookieInput"[\s\S]*placeholder="auth=\.\.\."><\/textarea>/);
-  assert.match(details, /<button id="opencodeCookieSubmit" class="add-save-btn" data-i18n="settings\.opencode\.saveProfile">/);
+  assert.match(details, /<div class="settings-actions">\s*<button id="opencodeCookieSubmit" data-i18n="settings\.opencode\.saveProfile">/);
   assert.match(details, /<div id="opencodeErrorMessage" class="settings-note error hidden"><\/div>/);
 
   const app = readRendererFile('app.js');
@@ -101,6 +103,8 @@ test('OpenCode account panel provides multi-profile management', () => {
   assert.match(app, /function setOpencodeCookieExpanded\(/);
 
   const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
+  assert.match(setupBody, /document\.getElementById\('opencodeAddToggle'\)/);
+  assert.match(setupBody, /addDetails\?\.classList\.toggle\('hidden'/);
   assert.match(setupBody, /window\.tokenMonitor\.opencode\.saveProfile\(/);
   assert.match(setupBody, /renderOpenCodeProfiles\(\)/);
   assert.match(setupBody, /updateOpenCodeProfilesStatus\(\)/);
@@ -190,6 +194,17 @@ test('DeepSeek account copy says browser and external URL is allowlisted', () =>
   const app = readRendererFile('app.js');
   const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\('https:\/\/platform\.deepseek\.com\/api_keys'\)/);
+});
+
+test('opencode status env account avoids saved profile names', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const handler = main.slice(
+    main.indexOf("ipcMain.handle('opencode:status'"),
+    main.indexOf("ipcMain.handle('opencode:getProfiles'")
+  );
+  assert.ok(handler, 'opencode:status handler should exist');
+  assert.match(handler, /hasOwnProperty\.call\(profiles, envKey\)/);
+  assert.doesNotMatch(handler, /hasOwnProperty\.call\(result, envKey\)/);
 });
 
 test('settingsForRenderer strips OpenCode cookies before they reach the renderer', () => {
