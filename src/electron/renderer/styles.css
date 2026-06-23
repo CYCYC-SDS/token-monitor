@@ -28,11 +28,7 @@
      themeCssVarEntries(). Must match --green above. */
   --accent-rgb: 183, 234, 212;
   --number: #f3fbf7;
-  /* Semantic blue, exposed as a triplet so the trend line and its area fill can
-     share one hue (and match the blue heatmap ramp) instead of the fill borrowing
-     the customisable --accent. */
-  --blue-rgb: 115, 189, 245;
-  --blue: rgb(var(--blue-rgb));
+  --blue: #73bdf5;
   --orange: #f4a073;
   --purple: #b394f4;
   --yellow: #f1d973;
@@ -1715,13 +1711,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   height: 100%;
 }
 .area-line-fill {
-  fill: url(#area-line-grad);
-}
-.area-line-grad-top {
-  stop-color: rgba(var(--blue-rgb), 0.22);
-}
-.area-line-grad-bottom {
-  stop-color: rgba(var(--blue-rgb), 0);
+  fill: rgba(var(--accent-rgb), 0.18);
 }
 .area-line-stroke {
   fill: none;
@@ -1803,8 +1793,6 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 }
 .home-activity-canvas .heat {
   fill: rgba(var(--overlay-rgb), 0.03);
-  stroke: none;
-  stroke-width: 0;
 }
 .home-activity-canvas .heat.lvl-1 {
   fill: rgba(90, 170, 255, 0.18);
@@ -1886,9 +1874,6 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 .row-icon-kimi       { -webkit-mask-image: url(../../../assets/icons/moonshot.svg);      mask-image: url(../../../assets/icons/moonshot.svg); }
 .row-icon-grok       { -webkit-mask-image: url(../../../assets/icons/xai.svg);           mask-image: url(../../../assets/icons/xai.svg); }
 .row-icon-copilot    { -webkit-mask-image: url(../../../assets/icons/copilot.svg);       mask-image: url(../../../assets/icons/copilot.svg); }
-.row-icon-pi         { -webkit-mask-image: url(../../../assets/icons/pi.svg);            mask-image: url(../../../assets/icons/pi.svg); }
-.row-icon-zed        { -webkit-mask-image: url(../../../assets/icons/zed.svg);           mask-image: url(../../../assets/icons/zed.svg); }
-.row-icon-kilocode   { -webkit-mask-image: url(../../../assets/icons/kilocode.svg);      mask-image: url(../../../assets/icons/kilocode.svg); }
 .row-icon-opencode   { -webkit-mask-image: url(../../../assets/icons/opencode.svg);      mask-image: url(../../../assets/icons/opencode.svg); }
 .row-icon-openclaw   { -webkit-mask-image: url(../../../assets/icons/openclaw.svg);      mask-image: url(../../../assets/icons/openclaw.svg); }
 .row-icon-deepseek   { -webkit-mask-image: url(../../../assets/icons/deepseek.svg);      mask-image: url(../../../assets/icons/deepseek.svg); }
@@ -1940,6 +1925,14 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 .limit-icon-deepseek {
   -webkit-mask-image: url(../../../assets/icons/deepseek.svg);
   mask-image: url(../../../assets/icons/deepseek.svg);
+}
+.limit-icon-grok {
+  -webkit-mask-image: url(../../../assets/icons/xai.svg);
+  mask-image: url(../../../assets/icons/xai.svg);
+}
+.limit-icon-minimax {
+  -webkit-mask-image: url(../../../assets/icons/minimax.svg);
+  mask-image: url(../../../assets/icons/minimax.svg);
 }
 .row-label {
   display: grid;
@@ -2196,6 +2189,11 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
+}
+/* When a provider only exposes a single window (e.g. Grok Monthly), let it
+   span the full row instead of sitting in the left half. */
+.limit-windows > .limit-window:only-child {
+  grid-column: 1 / -1;
 }
 .limit-windows-cursor {
   grid-template-columns: 1fr;

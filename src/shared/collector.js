@@ -375,12 +375,10 @@ async function collectUsageOnce(options) {
       // Serial on purpose: concurrent scans triple the peak CPU/IO load, which
       // is what let the issue #15 self-trigger loop spike tokscale past 500% CPU.
       const todayJson = await runTokscaleFn({ clients: normalizedClients, flags: ['--today'], commandTimeoutMs });
-      today = extractUsageFromTokscale(todayJson);
-      try { if (typeof options.onProgress === 'function') options.onProgress({ today, updatedAt: new Date().toISOString() }); } catch (_) {}
       const monthJson = await runTokscaleFn({ clients: normalizedClients, flags: ['--month'], commandTimeoutMs });
-      month = extractUsageFromTokscale(monthJson);
-      try { if (typeof options.onProgress === 'function') options.onProgress({ today, month, updatedAt: new Date().toISOString() }); } catch (_) {}
       const allTimeJson = await runTokscaleFn({ clients: normalizedClients, flags: ['--since', allTimeSince], commandTimeoutMs });
+      today = extractUsageFromTokscale(todayJson);
+      month = extractUsageFromTokscale(monthJson);
       allTime = extractUsageFromTokscale(allTimeJson);
     }
     applySessionTimestamps({ today, month, allTime }, options.homeDir || os.homedir());
@@ -465,27 +463,6 @@ function clientWatchCandidates(clientsCsv) {
   add('qwen', path.join(home, '.qwen', 'projects'));
   add('grok', path.join(process.env.GROK_HOME || path.join(home, '.grok'), 'sessions'));
   add('copilot', path.join(home, '.copilot', 'otel'));
-  add('pi', path.join(home, '.pi', 'agent', 'sessions'), path.join(home, '.omp', 'agent', 'sessions'));
-  // Zed: tokscale reads the XdgData root on every platform AND the native macOS
-  // (Application Support) / Windows (LOCALAPPDATA) roots (see tokscale scanner.rs
-  // cfg(macos)/cfg(windows) blocks) — watch all three so native mac/win users get
-  // seconds-level refresh and a correct waiting/missing status.
-  add(
-    'zed',
-    path.join(home, '.local', 'share', 'zed', 'threads'),
-    path.join(home, 'Library', 'Application Support', 'Zed', 'threads'),
-    path.join(process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'), 'Zed', 'threads')
-  );
-  // Kilo Code (VS Code ext): tokscale 3.1.3 only scans the Linux .config root and
-  // the .vscode-server (remote) root for KiloCode — unlike Cline, it does NOT scan
-  // the native macOS Application Support / Windows %APPDATA% roots. Watching those
-  // would be dead watches + a false "waiting" status, so we mirror exactly what
-  // tokscale reads. (Native mac/win support pending upstream tokscale.)
-  add(
-    'kilocode',
-    path.join(home, '.config', 'Code', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks'),
-    path.join(home, '.vscode-server', 'data', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')
-  );
   add(
     'cline',
     path.join(home, '.config', 'Code', 'User', 'globalStorage', 'saoudrizwan.claude-dev', 'tasks'),
@@ -537,25 +514,11 @@ function deriveClientStatus(clientsCsv, allTimePeriod) {
   return statusFromSignals(clients, clientDataDirPresence(clientsCsv), allTimePeriod?.clients || {});
 }
 
-// The frozen wslAnchor is only valid to merge into a preview period when it was
-// captured in the same calendar window: today only if the anchor is from today,
-// month only if from the same month. Otherwise a cross-day / cross-month full
-// scan would briefly add the previous period's WSL usage to the preview before
-// the final fresh scan corrects it. Returns the WSL period to merge, or null.
-function wslPeriodsForPreview(wslAnchor, anchorDateKey, todayKey) {
-  if (!wslAnchor) return { today: null, month: null };
-  const key = anchorDateKey || '';
-  return {
-    today: key === todayKey ? wslAnchor.today : null,
-    month: key.slice(0, 7) === todayKey.slice(0, 7) ? wslAnchor.month : null
-  };
-}
-
 function startCollector(options) {
   const {
     clients, allTimeSince, commandTimeoutMs, deviceId, agentVersion, agentRuntime,
     intervalMs, historyIntervalMs = 15 * 60 * 1000, historyEnabled = true, watchEnabled, watchDebounceMs, limitsEnabled,
-    onUpdate, onPreview, onError, logger
+    onUpdate, onError, logger
   } = options;
   const log = logger || (() => {});
   const limitsCollector = limitsEnabled !== false ? createLimitsCollector(options) : null;
@@ -602,50 +565,7 @@ function startCollector(options) {
         forceLimits: Boolean(tickOptions.forceLimits),
         todayOnlyAnchor: anchored ? anchor : null,
         wslAnchor: anchored ? wslAnchor : null,
-        onAnchorComputed: (x) => { captured = x; },
-        onProgress: (partial) => {
-          if (!partial.today) return;
-          try {
-            if (typeof onPreview === 'function') {
-              // Frozen WSL snapshot, gated so a cross-day/cross-month full scan
-              // doesn't merge a stale period's WSL usage into the preview.
-              const wsl = wslPeriodsForPreview(wslAnchor, anchor?.dateKey, todayKey);
-              const preview = {
-                deviceId, hostname: os.hostname(),
-                platform: `${process.platform}-${process.arch}`,
-                updatedAt: partial.updatedAt,
-                agentVersion, agentRuntime,
-                trackedClients: (clients || '').split(',').filter(Boolean),
-                // Merge the frozen WSL snapshot into today (as month/allTime do
-                // below) so the today card keeps its WSL contribution during a
-                // warm scan instead of dropping to host-only until the final tick.
-                today: wsl.today ? mergePeriods(partial.today, wsl.today) : partial.today
-              };
-              // Only include month/allTime when actually scanned. During warm
-              // full scans the main.js handler carries the previous values
-              // forward for omitted fields, so these cards don't flash empty.
-              if (partial.month) {
-                preview.month = wsl.month
-                  ? mergePeriods(partial.month, wsl.month)
-                  : partial.month;
-              }
-              if (partial.allTime) {
-                preview.allTime = wslAnchor
-                  ? mergePeriods(partial.allTime, wslAnchor.allTime)
-                  : partial.allTime;
-              }
-              // Only derive clientStatus when allTime is available; warm
-              // scans carry the previous status forward in main.js.
-              if (partial.allTime) {
-                preview.clientStatus = deriveClientStatus(clients, partial.allTime);
-              }
-              onPreview(preview);
-            }
-          } catch (_) {
-            // Progressive push errors must not abort the remaining period scans.
-            // The final onUpdate will report the complete data.
-          }
-        }
+        onAnchorComputed: (x) => { captured = x; }
       });
       if (stopped) return;
       if (!anchored && captured) {
@@ -751,7 +671,6 @@ module.exports = {
   collectUsageOnce,
   clientDataDirPresence,
   deriveClientStatus,
-  wslPeriodsForPreview,
   statusFromSignals,
   decideResolver,
   localTodayKey,

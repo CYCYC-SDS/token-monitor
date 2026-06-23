@@ -7,6 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { appVersion } = require('./appVersion');
 const { DEFAULT_LIMITS_REFRESH_MS, normalizeLimitProvider, normalizeLimitsSummary } = require('./limits');
+const { hashKey } = require('./hashKey');
 const cursorAuth = require('./cursorAuth');
 const cursorProbe = require('./cursorProbe');
 const antigravityProbe = require('./antigravityProbe');
@@ -15,8 +16,12 @@ const opencodeWeb = require('./opencodeWeb');
 const { sharedDataDir } = require('./config');
 const { recordConsumption } = require('./deepseekBalanceHistory');
 const { codexAuthIdentity } = require('./codexAuth');
+const minimaxLimits = require('./minimaxLimits');
+const { minimaxToken, minimaxBaseUrl, parseMinimaxTiers, fetchMinimaxLimits } = minimaxLimits;
+const grokLimits = require('./grokLimits');
+const { grokCredential, readAuthJson, parseGrokBilling, fetchGrokLimits } = grokLimits;
 
-const LIMIT_PROVIDER_IDS = ['claude', 'codex', 'cursor', 'antigravity', 'opencode', 'deepseek'];
+const LIMIT_PROVIDER_IDS = ['claude', 'codex', 'cursor', 'antigravity', 'opencode', 'deepseek', 'minimax', 'grok'];
 const LIMIT_REFRESH_VALUES = new Set([60_000, 120_000, 300_000, 900_000, 1_800_000]);
 const CLAUDE_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const CLAUDE_OAUTH_TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';
@@ -56,12 +61,6 @@ function normalizeLimitsRefreshMs(value) {
   const parsed = Number(value);
   if (LIMIT_REFRESH_VALUES.has(parsed)) return parsed;
   return DEFAULT_LIMITS_REFRESH_MS;
-}
-
-function hashKey(...parts) {
-  const hash = crypto.createHash('sha256');
-  for (const part of parts) hash.update(String(part || '')).update('\0');
-  return `sha256:${hash.digest('hex')}`;
 }
 
 function errorWithStatus(status, message) {
@@ -658,7 +657,7 @@ async function refreshClaudeCredentials(currentCredentials, deps = {}) {
   return { ...currentCredentials, ...refreshed };
 }
 
-async function fetchClaudeLimits(_options = {}, deps = {}) {
+async function fetchClaudeLimits(options = {}, deps = {}) {
   const nowMs = (deps.now || Date.now)();
   const platform = deps.platform || process.platform;
   try {
@@ -1151,6 +1150,19 @@ function mapCodexRateLimitsToProvider(payload, meta = {}) {
   });
 }
 
+async function readCodexAuthIdentity(deps = {}) {
+  const env = deps.env || process.env;
+  const filePath = deps.codexAuthPath || codexAuthPath(env);
+  try {
+    const auth = await readJsonFile(filePath, deps);
+    const account = auth?.tokens?.id_token || auth?.id_token || auth?.account || auth?.chatgpt || auth;
+    return { filePath, auth, account };
+  } catch (error) {
+    if (error.code === 'ENOENT') throw errorWithStatus('notConfigured', 'Codex auth.json not found');
+    throw error;
+  }
+}
+
 function pathDelimiterForPlatform(platform = process.platform) {
   return platform === 'win32' ? ';' : ':';
 }
@@ -1324,7 +1336,7 @@ function windowsCodexBinCandidates(binDir, deps = {}) {
   const pathApi = pathApiForPlatform('win32');
   const candidates = [pathApi.join(binDir, 'codex.exe')];
   const readdirSync = deps.readdirSync || fs.readdirSync;
-  let entries;
+  let entries = [];
   try {
     entries = readdirSync(binDir, { withFileTypes: true });
   } catch (_) {
@@ -1388,7 +1400,7 @@ function windowsCodexStoreCandidates(env = process.env, deps = {}) {
     envValue(env, 'ProgramW6432')
   ])) {
     const appxDir = pathApi.join(root, 'WindowsApps');
-    let entries;
+    let entries = [];
     try {
       entries = readdirSync(appxDir, { withFileTypes: true });
     } catch (_) {
@@ -1599,7 +1611,7 @@ function codexAccountKeyFromSeed(seed) {
   return raw.startsWith('sha256:') ? raw : hashKey('codex', raw || 'account');
 }
 
-async function fetchManagedCodexAccountLimits(account, _options = {}, deps = {}) {
+async function fetchManagedCodexAccountLimits(account, options = {}, deps = {}) {
   const nowMs = (deps.now || Date.now)();
   const env = {
     ...(deps.env || process.env),
@@ -1707,7 +1719,7 @@ async function fetchCodexLimits(options = {}, deps = {}) {
   return providers;
 }
 
-async function fetchAntigravityLimits(_options = {}, deps = {}) {
+async function fetchAntigravityLimits(options = {}, deps = {}) {
   const nowMs = (deps.now || Date.now)();
   const updatedAt = nowIso(nowMs);
   const probeFn = deps.antigravityProbe || antigravityProbe.probe;
@@ -1904,7 +1916,7 @@ async function fetchSingleOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, no
       windows,
       balanceUsd
     });
-  } catch {
+  } catch (err) {
     clearTimeout(timer);
     const cookieHash = crypto.createHash('sha256').update(cookie).digest('hex').slice(0, 12);
     return normalizeLimitProvider({
@@ -2024,6 +2036,8 @@ async function collectLimitsOnce(options = {}, deps = {}) {
     antigravity: (providerOptions) => fetchAntigravityLimits(providerOptions, deps),
     opencode: (providerOptions) => fetchOpenCodeLimits(providerOptions, deps),
     deepseek: (providerOptions) => fetchDeepSeekLimits(providerOptions, deps),
+    minimax: (providerOptions) => minimaxLimits.fetchMinimaxLimits(providerOptions, deps),
+    grok: (providerOptions) => grokLimits.fetchGrokLimits(providerOptions, deps),
     ...(deps.providerFetchers || {})
   };
   const providers = [];
@@ -2100,7 +2114,7 @@ function cursorBillingWindow(label, fields = {}) {
   };
 }
 
-async function fetchCursorLimits(_options = {}, deps = {}) {
+async function fetchCursorLimits(options = {}, deps = {}) {
   const nowMs = (deps.now || Date.now)();
   const updatedAt = new Date(nowMs).toISOString();
   const readActiveAccount = deps.readActiveAccount || cursorAuth.readActiveAccount;
@@ -2248,6 +2262,14 @@ module.exports = {
   runCodexLogin,
   deepseekToken,
   selectFundedRow,
+  minimaxToken,
+  minimaxBaseUrl,
+  parseMinimaxTiers,
+  fetchMinimaxLimits,
+  grokCredential,
+  readAuthJson,
+  parseGrokBilling,
+  fetchGrokLimits,
   mapClaudeCliUsageToProvider,
   mapClaudeUsageToProvider,
   mapCodexRateLimitsToProvider,

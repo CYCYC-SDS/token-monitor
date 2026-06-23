@@ -5,14 +5,18 @@ const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
 const { app, BrowserWindow, globalShortcut, ipcMain, nativeImage, screen, session, shell } = require('electron');
+
 const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFilePath, sharedDataDir } = require('../shared/config');
 const { appVersion } = require('../shared/appVersion');
+
 const { DEFAULT_CLIENTS, clientsCsvForSetting } = require('../shared/clientTracking');
 const { startCollector, lookupModelPricing } = require('../shared/collector');
 const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const { createHub } = require('../hub/server');
-const { deepseekToken, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin } = require('../shared/limitCollector');
+const { deepseekToken, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken } = require('../shared/limitCollector');
+const grokLimits = require('../shared/grokLimits');
+const { grokCredential, readAuthJson } = grokLimits;
 const { codexAuthIdentity, hashAccountKey } = require('../shared/codexAuth');
 const {
   normalizeClientDisplayOrder,
@@ -187,6 +191,7 @@ function defaultSettings() {
     opencodeCookie: '',
     opencodeProfiles: {},
     deepseekApiKey: '',
+    minimaxApiKey: '',
     codexManagedAccounts: [],
     appUpdate: {
       lastCheckedAt: null,
@@ -210,6 +215,20 @@ function normalizeDeepSeekApiKey(value) {
 
 function currentDeepSeekApiKey() {
   return settings?.deepseekApiKey || deepseekToken(process.env);
+}
+
+function normalizeMinimaxApiKey(value) {
+  return minimaxToken({}, String(value || ''));
+}
+
+function currentMinimaxApiKey() {
+  return settings?.minimaxApiKey || minimaxToken(process.env);
+}
+
+function currentGrokCredential() {
+  const envCred = grokCredential(process.env);
+  if (envCred) return envCred;
+  return readAuthJson(process.env);
 }
 
 let codexLoginInFlight = false;
@@ -1107,6 +1126,7 @@ function startSyncCollector() {
     opencodeCookie: settings.opencodeCookie || process.env.TOKEN_MONITOR_OPENCODE_COOKIE || '',
     opencodeProfiles: settings.opencodeProfiles || {},
     deepseekApiKey: settings.deepseekApiKey || '',
+    minimaxApiKey: settings.minimaxApiKey || '',
     codexManagedAccounts: codexManagedAccountsForCollector(),
     onUpdate: async (summary) => {
       const visibleSummary = summaryWithArchivedClientUsage(summary);
@@ -1146,6 +1166,7 @@ function startHostCollector() {
     opencodeCookie: settings.opencodeCookie || process.env.TOKEN_MONITOR_OPENCODE_COOKIE || '',
     opencodeProfiles: settings.opencodeProfiles || {},
     deepseekApiKey: settings.deepseekApiKey || '',
+    minimaxApiKey: settings.minimaxApiKey || '',
     codexManagedAccounts: codexManagedAccountsForCollector(),
     onUpdate: (summary) => {
       const visibleSummary = summaryWithArchivedClientUsage(summary);
@@ -1192,6 +1213,10 @@ function startHostStats() {
   // Prime the renderer with the current snapshot so it isn't blank until the
   // first collector tick lands.
   emit(embeddedHub.hub.getStats(), 'snapshot');
+}
+
+function isHubConfigured() {
+  return Boolean(effectiveHubConfig().url);
 }
 
 // Detection status is about this machine's local files, so stamp the freshly
@@ -1272,6 +1297,7 @@ function startLocalCollector() {
     opencodeCookie: settings.opencodeCookie || process.env.TOKEN_MONITOR_OPENCODE_COOKIE || '',
     opencodeProfiles: settings.opencodeProfiles || {},
     deepseekApiKey: settings.deepseekApiKey || '',
+    minimaxApiKey: settings.minimaxApiKey || '',
     codexManagedAccounts: codexManagedAccountsForCollector(),
     onUpdate: (summary, reason) => {
       const visibleSummary = summaryWithArchivedClientUsage(summary);
@@ -1283,43 +1309,6 @@ function startLocalCollector() {
       updateDiscordRpc(localStats, settings.currency);
       sendPush({ event: 'stats', data: { type: 'stats', reason, stats: localStats, at: new Date().toISOString() } });
       sendStatus(true, { reason });
-    },
-    // Progressive push: mid-tick partial results (today-only / today+month).
-    // Only wired for the local collector; sync/host modes never see these.
-    // History is carried forward by carryDeviceHistory; limits are carried
-    // forward manually so the limits panel doesn't flash empty between scans.
-    // Month/allTime/clientStatus are also carried forward when omitted so
-    // warm full scans stay stable across progressive updates.
-    onPreview: (summary) => {
-      const prevDevice = localDevice;
-      // Capture carry-forward needs before summaryWithArchivedClientUsage,
-      // which fills in empty periods for undefined fields (archived client path).
-      const needsMonth = !summary.month;
-      const needsAllTime = !summary.allTime;
-      const needsClientStatus = !summary.clientStatus;
-
-      const visible = summaryWithArchivedClientUsage(summary);
-      localDevice = carryDeviceHistory(localDevice, { ...visible, receivedAt: new Date().toISOString() });
-      // Carry forward usage periods omitted from the preview so warm full
-      // scans don't flash month/allTime to empty between tokscale scans.
-      if (needsMonth && prevDevice?.month) {
-        localDevice = { ...localDevice, month: prevDevice.month };
-      }
-      if (needsAllTime && prevDevice?.allTime) {
-        localDevice = { ...localDevice, allTime: prevDevice.allTime };
-      }
-      // Carry forward clientStatus when allTime is not yet available.
-      if (needsClientStatus && prevDevice?.clientStatus) {
-        localDevice = { ...localDevice, clientStatus: prevDevice.clientStatus };
-      }
-      if (!visible.limits && prevDevice?.limits) {
-        localDevice = { ...localDevice, limits: prevDevice.limits };
-      }
-      lastCollectedDevice = localDevice;
-      localStats = withHistoryPreview(aggregateDevices([localDevice], 0), [localDevice]);
-      updateDiscordRpc(localStats, settings.currency);
-      sendPush({ event: 'stats', data: { type: 'stats', reason: 'progress', stats: localStats, at: new Date().toISOString() } });
-      sendStatus(true, { reason: 'progress' });
     },
     onError: (error, reason) => {
       sendStatus(false, { reason: `${reason}:${error.message}` });
@@ -1462,9 +1451,18 @@ function settingsForRenderer() {
     : deepseekToken(process.env)
       ? 'env'
       : '';
+  const minimaxApiKeySource = settings?.minimaxApiKey
+    ? 'settings'
+    : minimaxToken(process.env)
+      ? 'env'
+      : '';
+  const grokCredential_ = currentGrokCredential();
+  const grokCookieSource = grokCredential_ ? grokCredential_.source : '';
+  const grokAuthJsonPath = grokCredential_ && grokCredential_.path ? grokCredential_.path : '';
   return {
     ...settings,
     deepseekApiKey: '',
+    minimaxApiKey: '',
     // Never ship OpenCode session cookies to the renderer; the UI only needs to
     // know whether a cookie is configured, not its value.
     opencodeCookie: settings?.opencodeCookie ? 'set' : '',
@@ -1474,6 +1472,11 @@ function settingsForRenderer() {
     codexManagedAccounts: codexAccountsForRenderer(),
     deepseekApiKeyConfigured: Boolean(currentDeepSeekApiKey()),
     deepseekApiKeySource,
+    minimaxApiKeyConfigured: Boolean(currentMinimaxApiKey()),
+    minimaxApiKeySource,
+    grokCookieConfigured: Boolean(grokCredential_),
+    grokCookieSource,
+    grokAuthJsonPath,
     windowToggleShortcutStatus: currentWindowToggleShortcutStatus()
   };
 }
@@ -1843,6 +1846,7 @@ function isAllowedExternalUrl(value) {
   if ((parsed.hostname === 'cursor.com' || parsed.hostname === 'www.cursor.com') && parsed.pathname.startsWith('/settings')) return true;
   if (parsed.hostname === 'opencode.ai' || parsed.hostname === 'www.opencode.ai') return true;
   if (parsed.hostname === 'platform.deepseek.com' && parsed.pathname.startsWith('/api_keys')) return true;
+  if (parsed.hostname === 'platform.minimaxi.com') return true;
   if (STATUS_PAGE_HOSTS.has(parsed.hostname) && (parsed.pathname === '' || parsed.pathname === '/')) return true;
   return false;
 }
@@ -2091,6 +2095,18 @@ let cursorStatusCache = { value: null, at: 0 };
 let opencodeStatusCache = { value: null, at: 0 };
 const CURSOR_STATUS_TTL_MS = 30 * 1000;
 
+// Used by collectors to get the cookie for limit collection.
+// Collector options already pass opencodeProfiles directly;
+// this fallback is for any remaining single-cookie path.
+function currentOpenCodeCookie() {
+  // 优先使用 profiles 中的第一个启用 cookie
+  const profiles = settings?.opencodeProfiles || {};
+  const enabled = Object.entries(profiles).find(([, p]) => p.enabled);
+  if (enabled) return enabled[1].cookie || '';
+  return settings?.opencodeCookie || process.env.TOKEN_MONITOR_OPENCODE_COOKIE || '';
+}
+
+
 function normalizeManualCookie(input) {
   let s = String(input || '').trim();
   if (!s) return '';
@@ -2170,6 +2186,7 @@ app.whenReady().then(() => {
     const previousLimitsRefreshMs = settings.limitsRefreshMs;
     const previousHistoryEnabled = settings.historyEnabled;
     const previousDeepSeekApiKey = settings.deepseekApiKey;
+    const previousMinimaxApiKey = settings.minimaxApiKey;
     const previousDiscordRpcEnabled = settings.discordRpcEnabled;
     const previousShowTrayIcon = settings.showTrayIcon;
     const previousTrayMode = settings.trayMode;
@@ -2183,6 +2200,7 @@ app.whenReady().then(() => {
     delete normalizedPatch.customModelPricing;
     if (patch.clients !== undefined) normalizedPatch.clients = clientsCsvForSetting(patch.clients, '');
     if (patch.deepseekApiKey !== undefined) normalizedPatch.deepseekApiKey = normalizeDeepSeekApiKey(patch.deepseekApiKey);
+    if (patch.minimaxApiKey !== undefined) normalizedPatch.minimaxApiKey = normalizeMinimaxApiKey(patch.minimaxApiKey);
     settings = normalizeWindowBehaviorSettings({
       ...settings,
       ...normalizedPatch,
@@ -2227,6 +2245,7 @@ app.whenReady().then(() => {
       language: patch.language !== undefined ? normalizeLanguageSetting(patch.language, settings.language) : normalizeLanguageSetting(settings.language),
       startAtLogin: loginItemEnabledHere() ? parseBoolean(patch.startAtLogin ?? settings.startAtLogin, false) : false,
       deepseekApiKey: patch.deepseekApiKey !== undefined ? normalizeDeepSeekApiKey(patch.deepseekApiKey) : (settings.deepseekApiKey || ''),
+      minimaxApiKey: patch.minimaxApiKey !== undefined ? normalizeMinimaxApiKey(patch.minimaxApiKey) : (settings.minimaxApiKey || ''),
       customModelPricing: patch.customModelPricing !== undefined
         ? normalizeCustomPricingSetting(patch.customModelPricing)
         : normalizeCustomPricingSetting(settings.customModelPricing)
@@ -2271,7 +2290,8 @@ app.whenReady().then(() => {
       settings.limitProviders !== previousLimitProviders ||
       settings.limitsRefreshMs !== previousLimitsRefreshMs ||
       settings.historyEnabled !== previousHistoryEnabled ||
-      settings.deepseekApiKey !== previousDeepSeekApiKey
+      settings.deepseekApiKey !== previousDeepSeekApiKey ||
+      settings.minimaxApiKey !== previousMinimaxApiKey
     ) {
       startMode();
     }
