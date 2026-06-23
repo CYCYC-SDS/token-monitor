@@ -308,6 +308,7 @@
     claude: '#cc7c5e', codex: '#49a3b0', hermes: '#d4af37', gemini: '#4285f4',
     antigravity: '#4285f4', cline: '#323B43', kimi: '#16191e', grok: '#000000', copilot: '#24292f', deepseek: '#4d6bfe', cursor: '#000000', opencode: '#000000',
     openclaw: '#ff4d4d', xai: '#000000', meta: '#1d65c1', mistral: '#fa520f', qwen: '#615ced',
+    pi: '#000', zed: '#4173e7', kilocode: '#F8F676',
     moonshot: '#16191e', zai: '#000000', cohere: '#39594d', xiaomi: '#ff6700', minimax: '#f23f5d',
     default: '#6ab4f0'
   };
@@ -367,9 +368,17 @@
   }
 
   function areaLineSvg(model) {
+    // Top-to-bottom blue fade (stop colours live in styles.css so they track the
+    // theme). objectBoundingBox keeps the fade vertical regardless of the path bbox.
+    const defs = model.areaPath
+      ? '<defs><linearGradient id="area-line-grad" x1="0" y1="0" x2="0" y2="1">'
+        + '<stop class="area-line-grad-top" offset="0"></stop>'
+        + '<stop class="area-line-grad-bottom" offset="1"></stop>'
+        + '</linearGradient></defs>'
+      : '';
     const fill = model.areaPath ? `<path class="area-line-fill" d="${model.areaPath}"></path>` : '';
     const line = model.linePath ? `<path class="area-line-stroke" d="${model.linePath}"></path>` : '';
-    return `<svg class="area-line" viewBox="0 0 ${model.width} ${model.height}" preserveAspectRatio="none" width="100%" height="100%" aria-hidden="true">${fill}${line}</svg>`;
+    return `<svg class="area-line" viewBox="0 0 ${model.width} ${model.height}" preserveAspectRatio="none" width="100%" height="100%" aria-hidden="true">${defs}${fill}${line}</svg>`;
   }
 
   function axisText(label, x, y) {

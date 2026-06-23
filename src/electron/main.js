@@ -16,7 +16,7 @@ const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared
 const { createHub } = require('../hub/server');
 const { deepseekToken, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken } = require('../shared/limitCollector');
 const grokLimits = require('../shared/grokLimits');
-const { grokCredential, readAuthJson } = grokLimits;
+const { grokCredential } = grokLimits;
 const { codexAuthIdentity, hashAccountKey } = require('../shared/codexAuth');
 const {
   normalizeClientDisplayOrder,
@@ -226,9 +226,9 @@ function currentMinimaxApiKey() {
 }
 
 function currentGrokCredential() {
-  const envCred = grokCredential(process.env);
-  if (envCred) return envCred;
-  return readAuthJson(process.env);
+  // grokCredential already falls back to ~/.grok/auth.json when no env var is
+  // set, so this is a one-liner.
+  return grokCredential(process.env);
 }
 
 let codexLoginInFlight = false;
@@ -1847,6 +1847,7 @@ function isAllowedExternalUrl(value) {
   if (parsed.hostname === 'opencode.ai' || parsed.hostname === 'www.opencode.ai') return true;
   if (parsed.hostname === 'platform.deepseek.com' && parsed.pathname.startsWith('/api_keys')) return true;
   if (parsed.hostname === 'platform.minimaxi.com') return true;
+  if (parsed.hostname === 'platform.minimax.io') return true;
   if (STATUS_PAGE_HOSTS.has(parsed.hostname) && (parsed.pathname === '' || parsed.pathname === '/')) return true;
   return false;
 }

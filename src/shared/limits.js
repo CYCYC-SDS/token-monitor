@@ -129,6 +129,13 @@ function normalizeProviderBalance(input) {
   };
 }
 
+function normalizeRegion(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return '';
+  if (raw === 'cn' || raw === 'en' || raw === 'global') return raw;
+  return raw.length <= 16 ? raw : '';
+}
+
 function normalizeLimitProvider(input) {
   if (!input || typeof input !== 'object') return null;
   const provider = normalizeProviderId(input.provider);
@@ -148,7 +155,8 @@ function normalizeLimitProvider(input) {
     updatedAt: normalizeIsoTimestamp(input.updatedAt) || normalizeIsoTimestamp(input.checkedAt),
     windows,
     balanceUsd: numberOrNull(input.balanceUsd),
-    balance: normalizeProviderBalance(input.balance)
+    balance: normalizeProviderBalance(input.balance),
+    region: normalizeRegion(input.region)
   };
 }
 

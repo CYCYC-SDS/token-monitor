@@ -1,9 +1,9 @@
 'use strict';
 
-const clientLabels = { claude: 'Claude Code', codex: 'Codex', hermes: 'Hermes', gemini: 'Gemini', cursor: 'Cursor', opencode: 'OpenCode', openclaw: 'OpenClaw', antigravity: 'Antigravity', cline: 'Cline', kimi: 'Kimi', qwen: 'Qwen', grok: 'Grok Build', copilot: 'GitHub Copilot' };
+const clientLabels = { claude: 'Claude Code', codex: 'Codex', hermes: 'Hermes', gemini: 'Gemini', cursor: 'Cursor', opencode: 'OpenCode', openclaw: 'OpenClaw', antigravity: 'Antigravity', cline: 'Cline', kimi: 'Kimi', qwen: 'Qwen', grok: 'Grok Build', copilot: 'GitHub Copilot', pi: 'Pi', zed: 'Zed', kilocode: 'Kilo Code' };
 const { clientColors, fallbackModelColors, modelVendorFor, modelColor } = window.TokenMonitorUsageCharts;
 const clientsWithIcon = new Set([
-  'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot',
+  'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode',
   'xai', 'deepseek', 'meta', 'mistral', 'qwen', 'moonshot', 'zai', 'cohere', 'xiaomi', 'minimax'
 ]);
 
@@ -49,7 +49,10 @@ const KNOWN_CLIENTS = [
   { id: 'kimi', label: 'Kimi' },
   { id: 'qwen', label: 'Qwen' },
   { id: 'grok', label: 'Grok Build' },
-  { id: 'copilot', label: 'GitHub Copilot' }
+  { id: 'copilot', label: 'GitHub Copilot' },
+  { id: 'pi', label: 'Pi' },
+  { id: 'zed', label: 'Zed' },
+  { id: 'kilocode', label: 'Kilo Code' }
 ];
 const LIMIT_PROVIDERS = [
   { id: 'claude', label: 'Claude', settingsLabel: 'Claude Code' },
@@ -155,7 +158,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeActivityScrollLeft: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, homeSettingsExpanded: false, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', customPricingExpanded: false, opencodeProfileCount: 0, opencodeCookieExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, grokAccountExpanded: false, floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, homeSettingsExpanded: false, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', customPricingExpanded: false, opencodeProfileCount: 0, opencodeCookieExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, grokAccountExpanded: false, floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
 state.settingsSections = Object.fromEntries(SETTINGS_SECTION_IDS.map((id) => [id, false]));
 const defaultAppearance = { glassOpacity: 68, glassBlur: 32, zoomFactor: 1, systemGlass: true, showLiveDot: true, showToolIcons: true, titleIconOnly: false, settingsInTitlebar: false };
 let preferenceDrag = null;
@@ -677,7 +680,7 @@ function rowTemplate(rowData) {
   return row;
 }
 
-function updateRow(row, { name, subtitle, detail, value, cost, max, color, stale, platform, local, client, kind, title, cacheReadTokens, cacheWriteTokens, outputTokens }) {
+function updateRow(row, { name, subtitle, detail, value, cost, max, color, stale, platform, local, client, kind, cacheReadTokens, outputTokens }) {
   const width = rowWidth(value, max);
   const isExpanded = row.classList.contains('expanded');
   row.className = `row${kind ? ` ${kind}-row` : ''}${stale ? ' stale' : ''}${local ? ' local' : ''}`;
@@ -894,7 +897,7 @@ function ensureBreakdownVisible() {
   if (next !== state.breakdown) setBreakdown(next);
 }
 
-function limitStatusLabel(status, stale) {
+function limitStatusLabel(status) {
   if (status === 'ok') return 'Live';
   if (status === 'disabled') return 'Disabled';
   if (status === 'notConfigured') return 'Not signed in';
@@ -1191,16 +1194,13 @@ function renderProviderWindows(provider, color) {
       }
     }
   } else {
-    // Prefer the window's own label when present (e.g. grok uses 'Monthly' /
-    // 'On-demand' instead of the generic 'Session' / 'Weekly'). Fall back to
-    // the canonical names so the existing Claude/Codex/Antigravity rows keep
-    // their original copy.
-    const sessionWindow = windowForKind(provider, 'session');
-    const weeklyWindow = windowForKind(provider, 'weekly');
-    windows.append(limitWindowNode(sessionWindow && sessionWindow.label ? sessionWindow.label : 'Session', sessionWindow, color, 0.95));
-    if (weeklyWindow) {
-      windows.append(limitWindowNode(weeklyWindow.label ? weeklyWindow.label : 'Weekly', weeklyWindow, color, 0.68));
-    }
+    // Default: render only the windows the provider actually has. Providers
+    // that only expose a single window (e.g. Grok Monthly) shouldn't leave
+    // a half-empty "Weekly" bar next to the real one.
+    const session = windowForKind(provider, 'session');
+    const weekly = windowForKind(provider, 'weekly');
+    if (session) windows.append(limitWindowNode(session.label || 'Session', session, color, 0.95));
+    if (weekly) windows.append(limitWindowNode(weekly.label || 'Weekly', weekly, color, 0.68));
   }
   return windows;
 }
@@ -2013,13 +2013,30 @@ function dailyWithHeatIntensity(daily) {
   });
 }
 
+function applyHomeActivityScroll(scroller) {
+  const target = homeOverviewApi.homeActivityScrollTarget({
+    scrollWidth: scroller.scrollWidth,
+    clientWidth: scroller.clientWidth,
+    followEnd: state.homeActivityFollowEnd,
+    savedLeft: state.homeActivityScrollLeft
+  });
+  if (Math.abs(scroller.scrollLeft - target) > 0.5) scroller.scrollLeft = target;
+  scroller.classList.toggle('is-scrolled', target > 2);
+}
+
 function setupHomeActivityScroller(scroller) {
   let drag = null;
-  const updatePosition = () => {
-    state.homeActivityScrollLeft = scroller.scrollLeft;
+  scroller.addEventListener('scroll', () => {
     scroller.classList.toggle('is-scrolled', scroller.scrollLeft > 2);
-  };
-  scroller.addEventListener('scroll', updatePosition);
+    const record = homeOverviewApi.homeActivityScrollRecord({
+      scrollLeft: scroller.scrollLeft,
+      scrollWidth: scroller.scrollWidth,
+      clientWidth: scroller.clientWidth
+    });
+    if (!record) return; // not laid out / panel hidden — don't persist a bogus position
+    state.homeActivityScrollLeft = record.scrollLeft;
+    state.homeActivityFollowEnd = record.followEnd;
+  });
   scroller.addEventListener('click', (event) => event.stopPropagation());
   scroller.addEventListener('pointerdown', (event) => {
     if (event.button !== 0 || event.pointerType === 'touch') return;
@@ -2041,15 +2058,18 @@ function setupHomeActivityScroller(scroller) {
   };
   scroller.addEventListener('pointerup', endDrag);
   scroller.addEventListener('pointercancel', endDrag);
-}
 
-function restoreHomeActivityScroll() {
-  const scroller = els.homePanel?.querySelector('.home-activity-scroll');
-  if (!scroller) return;
-  const max = Math.max(0, scroller.scrollWidth - scroller.clientWidth);
-  const target = state.homeActivityScrollLeft == null ? max : Math.min(max, state.homeActivityScrollLeft);
-  scroller.scrollLeft = target;
-  scroller.classList.toggle('is-scrolled', target > 2);
+  // Land on the newest (right) column only after the browser has actually laid the
+  // heatmap out. A single requestAnimationFrame measures before layout settles on a
+  // cold window (far more often on Windows), reads scrollWidth === clientWidth, and
+  // sticks at the oldest edge. ResizeObserver delivers post-layout and also fires once
+  // the panel becomes visible / the window resizes, so the measurement is always real.
+  state.homeActivityResizeObserver?.disconnect();
+  if (typeof ResizeObserver === 'function') {
+    state.homeActivityResizeObserver = new ResizeObserver(() => applyHomeActivityScroll(scroller));
+    state.homeActivityResizeObserver.observe(scroller);
+  }
+  applyHomeActivityScroll(scroller);
 }
 
 function renderHomeTrendsModule() {
@@ -2065,10 +2085,11 @@ function renderHomeTrendsModule() {
     body.append(empty);
     return module;
   }
+  const activityLayout = homeOverviewApi.homeActivityHeatmapLayout();
   const activity = charts.rollingYearHeatmap(dailyWithHeatIntensity(points), {
     endDate: new Date().toISOString().slice(0, 10),
-    cell: 8,
-    gap: 3
+    cell: activityLayout.cell,
+    gap: activityLayout.gap
   });
   const activeDays = activity.cells.filter((cell) => cell.intensity > 0).length;
   const { module, body } = homeModuleShell('trends', t('home.activity'), 'trends', t('home.activeDays', { count: activeDays }));
@@ -2080,7 +2101,8 @@ function renderHomeTrendsModule() {
   const activityCanvas = document.createElement('div');
   activityCanvas.className = 'home-activity-canvas';
   activityCanvas.innerHTML = charts.heatmapSvg(activity, {
-    monthLabel: (month) => compactMonthLabel(month.label)
+    monthLabel: (month) => compactMonthLabel(month.label),
+    radius: activityLayout.radius
   });
   activityScroll.append(activityCanvas);
   setupHomeActivityScroller(activityScroll);
@@ -2115,6 +2137,10 @@ function renderHomeTrendsModule() {
 
 function renderHome() {
   if (!els.homePanel) return;
+  // The previous scroller (and its ResizeObserver) is about to be replaced; drop the
+  // observer so at most one is live and it is gone if the trends module disappears.
+  state.homeActivityResizeObserver?.disconnect();
+  state.homeActivityResizeObserver = null;
   const period = state.stats.periods?.[state.period] || { totalTokens: 0, costUsd: 0, clients: {} };
   const moduleIds = homeModuleIds();
   if (moduleIds.includes('trends')) void loadHomeHistory();
@@ -2142,7 +2168,8 @@ function renderHome() {
     return renderHomeTrendsModule();
   });
   els.homePanel.replaceChildren(...nodes);
-  requestAnimationFrame(restoreHomeActivityScroll);
+  // setupHomeActivityScroller wires a ResizeObserver that applies the scroll position
+  // post-layout, so no requestAnimationFrame guess is needed here.
 }
 
 function render() {
@@ -2344,8 +2371,6 @@ async function refreshStats(options = {}) {
     renderLimitProviderCheckboxes();
     renderToolPreferences();
     renderDeepseekStatus();
-    renderMinimaxStatus();
-    renderGrokStatus();
     maybeUpdateBarsIcon();
     if (feedback) settleRefreshButtonState('refreshed');
   } catch (error) {
@@ -3158,8 +3183,6 @@ function syncSettingsForm() {
   els.blurInput.value = String(state.settings.glassBlur ?? 32);
   els.zoomInput.value = String(Math.round((Number(state.settings.zoomFactor) || 1) * 100));
   renderDeepseekStatus();
-  renderMinimaxStatus();
-  renderGrokStatus();
   renderViewPreferences();
   renderToolPreferences();
   renderLimitProviderCheckboxes();
@@ -3644,7 +3667,7 @@ function renderToolPreferences() {
   if (els.resetClientDisplayOrderButton) els.resetClientDisplayOrderButton.disabled = !hasCustomOrder && !hasPinnedClients;
   if (els.showAllClientsButton) els.showAllClientsButton.disabled = !hasHiddenClients;
   els.clientDisplayList.replaceChildren();
-  for (const [index, { id, label }] of clients.entries()) {
+  for (const { id, label } of clients) {
     const row = document.createElement('div');
     row.className = 'tool-preference-row';
     row.dataset.client = id;
@@ -3712,7 +3735,7 @@ function renderLimitProviderCheckboxes() {
   const collected = new Map((state.stats?.limits?.providers || []).map((provider) => [provider.provider, provider]));
   const providers = limitProviderOrderApi.orderedLimitProviders(LIMIT_PROVIDERS, state.settings?.limitProviderOrder);
   els.limitProviderCheckboxes.replaceChildren();
-  for (const [index, { id, label, settingsLabel }] of providers.entries()) {
+  for (const { id, label, settingsLabel } of providers) {
     const provider = enabled.has(id)
       ? (collected.get(id) || { provider: id, ...(state.stats ? { status: missingLimitProviderStatus() } : {}), windows: [] })
       : { provider: id, status: 'disabled', windows: [] };
@@ -4259,8 +4282,6 @@ window.tokenMonitor.onSettingsPush?.((next) => {
   state.settings = next;
   syncSettingsForm();
   renderDeepseekStatus();
-  renderMinimaxStatus();
-  renderGrokStatus();
   maybeUpdateBarsIcon();
 });
 
@@ -4311,8 +4332,6 @@ window.tokenMonitor.onStatsPush?.((payload) => {
     renderLimitProviderCheckboxes();
     renderToolPreferences();
     renderDeepseekStatus();
-    renderMinimaxStatus();
-    renderGrokStatus();
     maybeUpdateBarsIcon();
   }
   restartTimer();
@@ -4654,6 +4673,17 @@ function minimaxProviderStatus() {
 
 function minimaxAccountLinked() {
   return Boolean(state.settings?.minimaxApiKeyConfigured) && minimaxProviderStatus()?.status === 'ok';
+}
+
+// Follow the region we last successfully polled so a global (minimax.io)
+// account lands on platform.minimax.io, not the CN landing page. Fall back
+// to the CN host until we've seen a successful poll.
+function minimaxPlatformUrl() {
+  const provider = minimaxProviderStatus();
+  const region = provider && provider.region === 'en' ? 'en' : 'cn';
+  return region === 'en'
+    ? 'https://platform.minimax.io/user-center/payment/token-plan'
+    : 'https://platform.minimaxi.com/user-center/payment/token-plan';
 }
 
 function setMinimaxAccountExpanded(expanded) {
@@ -5407,15 +5437,14 @@ function setupCursorAccountUI() {
       }
     });
   }
-
-  const minimaxToggle = document.getElementById('minimaxSettingsToggle');
+const minimaxToggle = document.getElementById('minimaxSettingsToggle');
   if (minimaxToggle) {
     minimaxToggle.addEventListener('click', () => setMinimaxAccountExpanded(!state.minimaxAccountExpanded));
     setMinimaxAccountExpanded(false);
     renderMinimaxStatus();
 
     document.getElementById('minimaxOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal('https://platform.minimaxi.com/user-center/payment/token-plan');
+      window.tokenMonitor.openExternal(minimaxPlatformUrl());
     });
 
     document.getElementById('minimaxLogoutButton').addEventListener('click', async () => {

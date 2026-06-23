@@ -6,9 +6,8 @@
 // Auth: Bearer token from ~/.grok/auth.json (written by `grok login`) or
 //       GROK_BEARER_TOKEN env var.
 //
-// Reference: TokenTracker at C:\Users\Administrator\AppData\Local\Programs\
-//   TokenTracker\EmbeddedServer\tokentracker\src\lib\grok-limits.js
-//   (same endpoint, same auth pattern, same response shape).
+// Field shape and auth pattern mirror TokenTracker's grok-limits.js (same
+// endpoint, same `config: { monthlyLimit, used, billingPeriodEnd }` envelope).
 
 const fs = require('node:fs');
 const os = require('node:os');
