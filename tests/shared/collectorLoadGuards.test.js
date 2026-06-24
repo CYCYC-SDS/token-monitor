@@ -304,6 +304,10 @@ test('a watch event during an in-flight tick re-arms the debounce instead of coa
   const tmp = withTmpHome([path.join('.claude', 'projects')]);
   const originalHomedir = os.homedir;
   os.homedir = () => tmp;
+  // Isolate the shared data dir so the test doesn't pick up a real
+  // collector-anchor.json left by the actual app (anchor persistence).
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
   const chokidar = require('chokidar');
   const originalWatch = chokidar.watch;
@@ -370,6 +374,8 @@ test('a watch event during an in-flight tick re-arms the debounce instead of coa
     childProcess.spawn = originalSpawn;
     chokidar.watch = originalWatch;
     os.homedir = originalHomedir;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
     delete require.cache[collectorPath];
     fs.rmSync(tmp, { recursive: true, force: true });
   }

@@ -5,10 +5,8 @@ const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
 const { app, BrowserWindow, globalShortcut, ipcMain, nativeImage, screen, session, shell } = require('electron');
-
 const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFilePath, sharedDataDir } = require('../shared/config');
 const { appVersion } = require('../shared/appVersion');
-
 const { DEFAULT_CLIENTS, clientsCsvForSetting } = require('../shared/clientTracking');
 const { startCollector, lookupModelPricing } = require('../shared/collector');
 const { customPricingPath } = require('../shared/tokscaleConfig');
@@ -40,7 +38,8 @@ const cursorAuth = require('../shared/cursorAuth');
 const cursorProbe = require('../shared/cursorProbe');
 const opencodeWeb = require('../shared/opencodeWeb');
 const semver = require('semver');
-const { normalizeCurrency } = require('../shared/currency');
+const { normalizeCurrency, resolveEffectiveRates, configureRates } = require('../shared/currency');
+const { fetchRates, isCacheStale } = require('../shared/exchangeRates');
 const {
   applyArchivedClientUsage,
   captureArchivedClientUsage,
@@ -186,6 +185,7 @@ function defaultSettings() {
     trayContent: 'tokens',
     windowToggleShortcut: '',
     currency: normalizeCurrency(process.env.TOKEN_MONITOR_CURRENCY || 'USD'),
+    currencyRates: {},
     startAtLogin: false,
     language: 'auto',
     opencodeCookie: '',
@@ -750,6 +750,20 @@ function adjustZoom(delta) {
   setZoomFactor(clampZoom(settings.zoomFactor) + delta);
 }
 
+function normalizeCurrencyOverrides(value) {
+  const out = {};
+  if (value && typeof value === 'object') {
+    for (const [code, raw] of Object.entries(value)) {
+      const key = normalizeCurrency(code, '');
+      const num = Number(raw);
+      // normalizeCurrency falls back to 'USD' for unknown codes; excluding 'USD'
+      // drops both unknown codes and any attempt to override the USD base (always 1).
+      if (key !== 'USD' && Number.isFinite(num) && num > 0) out[key] = num;
+    }
+  }
+  return out;
+}
+
 function readSettings() {
   settingsPath = path.join(app.getPath('userData'), 'settings.json');
   try {
@@ -804,6 +818,7 @@ function readSettings() {
     merged.hubMode = normalizeHubMode(merged.hubMode);
     merged.language = normalizeLanguageSetting(merged.language);
     merged.currency = normalizeCurrency(merged.currency);
+    merged.currencyRates = normalizeCurrencyOverrides(merged.currencyRates);
     merged.hubHostPort = normalizeHubPort(merged.hubHostPort);
     merged.hubHostSecret = typeof merged.hubHostSecret === 'string' ? merged.hubHostSecret : '';
     merged.floatingBubbleEnabled = parseBoolean(merged.floatingBubbleEnabled ?? merged.edgeDrawerEnabled, false);
@@ -1215,10 +1230,6 @@ function startHostStats() {
   emit(embeddedHub.hub.getStats(), 'snapshot');
 }
 
-function isHubConfigured() {
-  return Boolean(effectiveHubConfig().url);
-}
-
 // Detection status is about this machine's local files, so stamp the freshly
 // collected local clientStatus onto the local device in whatever stats we hand the
 // renderer. This keeps the采集 tags correct in sync mode without depending on the
@@ -1240,6 +1251,45 @@ function sendPush(payload) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     try { mainWindow.webContents.send('stats:push', payload); } catch (_) {}
   }
+}
+
+let rateCache = null;            // { rates, date, source, fetchedAt }
+let effectiveRates = null;       // { CODE: number }
+let rateRefreshTimer = null;
+
+function exchangeRateCachePath() {
+  return path.join(app.getPath('userData'), 'exchange-rates.json');
+}
+
+function readRateCache() {
+  try { return JSON.parse(fs.readFileSync(exchangeRateCachePath(), 'utf8')); }
+  catch (_) { return null; }
+}
+
+function writeRateCache(data) {
+  try { fs.writeFileSync(exchangeRateCachePath(), JSON.stringify(data)); }
+  catch (_) {}
+}
+
+function applyEffectiveRates() {
+  effectiveRates = resolveEffectiveRates(rateCache?.rates || {}, settings?.currencyRates || {});
+  configureRates(effectiveRates);          // main process's own currency module
+  return effectiveRates;
+}
+
+async function refreshExchangeRates({ force = false } = {}) {
+  if (rateCache === null) rateCache = readRateCache();
+  if (force || isCacheStale(rateCache)) {
+    try {
+      const result = await fetchRates();
+      rateCache = { rates: result.rates, date: result.date, source: result.source, fetchedAt: Date.now() };
+      writeRateCache(rateCache);
+    } catch (_) { /* silent: keep last cache / built-in defaults */ }
+  }
+  applyEffectiveRates();
+  updateTrayDisplay();
+  if (settings?.discordRpcEnabled && latestStats) updateDiscordRpc(latestStats, settings.currency);
+  pushSettingsToRenderer();
 }
 
 function updateTrayDisplay() {
@@ -1309,6 +1359,43 @@ function startLocalCollector() {
       updateDiscordRpc(localStats, settings.currency);
       sendPush({ event: 'stats', data: { type: 'stats', reason, stats: localStats, at: new Date().toISOString() } });
       sendStatus(true, { reason });
+    },
+    // Progressive push: mid-tick partial results (today-only / today+month).
+    // Only wired for the local collector; sync/host modes never see these.
+    // History is carried forward by carryDeviceHistory; limits are carried
+    // forward manually so the limits panel doesn't flash empty between scans.
+    // Month/allTime/clientStatus are also carried forward when omitted so
+    // warm full scans stay stable across progressive updates.
+    onPreview: (summary) => {
+      const prevDevice = localDevice;
+      // Capture carry-forward needs before summaryWithArchivedClientUsage,
+      // which fills in empty periods for undefined fields (archived client path).
+      const needsMonth = !summary.month;
+      const needsAllTime = !summary.allTime;
+      const needsClientStatus = !summary.clientStatus;
+
+      const visible = summaryWithArchivedClientUsage(summary);
+      localDevice = carryDeviceHistory(localDevice, { ...visible, receivedAt: new Date().toISOString() });
+      // Carry forward usage periods omitted from the preview so warm full
+      // scans don't flash month/allTime to empty between tokscale scans.
+      if (needsMonth && prevDevice?.month) {
+        localDevice = { ...localDevice, month: prevDevice.month };
+      }
+      if (needsAllTime && prevDevice?.allTime) {
+        localDevice = { ...localDevice, allTime: prevDevice.allTime };
+      }
+      // Carry forward clientStatus when allTime is not yet available.
+      if (needsClientStatus && prevDevice?.clientStatus) {
+        localDevice = { ...localDevice, clientStatus: prevDevice.clientStatus };
+      }
+      if (!visible.limits && prevDevice?.limits) {
+        localDevice = { ...localDevice, limits: prevDevice.limits };
+      }
+      lastCollectedDevice = localDevice;
+      localStats = withHistoryPreview(aggregateDevices([localDevice], 0), [localDevice]);
+      updateDiscordRpc(localStats, settings.currency);
+      sendPush({ event: 'stats', data: { type: 'stats', reason: 'progress', stats: localStats, at: new Date().toISOString() } });
+      sendStatus(true, { reason: 'progress' });
     },
     onError: (error, reason) => {
       sendStatus(false, { reason: `${reason}:${error.message}` });
@@ -1477,13 +1564,24 @@ function settingsForRenderer() {
     grokCookieConfigured: Boolean(grokCredential_),
     grokCookieSource,
     grokAuthJsonPath,
+    currencyRatesEffective: effectiveRates || resolveEffectiveRates(rateCache?.rates || {}, settings?.currencyRates || {}),
+    currencyRateInfo: rateCache ? { source: rateCache.source, date: rateCache.date, fetchedAt: rateCache.fetchedAt } : null,
     windowToggleShortcutStatus: currentWindowToggleShortcutStatus()
   };
 }
 
 function pushSettingsToRenderer() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  try { mainWindow.webContents.send('settings:push', settingsForRenderer()); } catch (_) {}
+  const payload = settingsForRenderer();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    try { mainWindow.webContents.send('settings:push', payload); } catch (_) {}
+  }
+  // The trends dashboard is a separate renderer with its own currency module
+  // instance; it must receive effective-rate updates too, otherwise an
+  // already-open dashboard keeps showing the previous rate after an auto
+  // refresh or manual override until it is reopened.
+  if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+    try { dashboardWindow.webContents.send('settings:push', payload); } catch (_) {}
+  }
 }
 
 function unregisterWindowToggleShortcut() {
@@ -2096,18 +2194,6 @@ let cursorStatusCache = { value: null, at: 0 };
 let opencodeStatusCache = { value: null, at: 0 };
 const CURSOR_STATUS_TTL_MS = 30 * 1000;
 
-// Used by collectors to get the cookie for limit collection.
-// Collector options already pass opencodeProfiles directly;
-// this fallback is for any remaining single-cookie path.
-function currentOpenCodeCookie() {
-  // 优先使用 profiles 中的第一个启用 cookie
-  const profiles = settings?.opencodeProfiles || {};
-  const enabled = Object.entries(profiles).find(([, p]) => p.enabled);
-  if (enabled) return enabled[1].cookie || '';
-  return settings?.opencodeCookie || process.env.TOKEN_MONITOR_OPENCODE_COOKIE || '';
-}
-
-
 function normalizeManualCookie(input) {
   let s = String(input || '').trim();
   if (!s) return '';
@@ -2164,6 +2250,10 @@ app.whenReady().then(() => {
   regenerateTokscalePricing();
   startMode();
   if (settings.discordRpcEnabled) startDiscordRpc();
+  rateCache = readRateCache();
+  applyEffectiveRates();                 // use cache/defaults immediately, avoid first-paint gap
+  refreshExchangeRates();                // non-blocking: only fetches when stale
+  rateRefreshTimer = setInterval(() => { refreshExchangeRates(); }, 6 * 60 * 60 * 1000);
   setTimeout(() => { checkTokscaleNpm({ silent: true }); }, 2000);
   ipcMain.handle('settings:get', () => settingsForRenderer());
   ipcMain.handle('pricing:lookup', async (_event, modelId) => {
@@ -2243,6 +2333,7 @@ app.whenReady().then(() => {
       floatingBubbleContent: normalizeTrayContent(patch.floatingBubbleContent ?? settings.floatingBubbleContent, 'icon'),
       windowToggleShortcut: normalizeWindowToggleShortcut(patch.windowToggleShortcut ?? settings.windowToggleShortcut),
       currency: normalizedCurrency,
+      currencyRates: patch.currencyRates !== undefined ? normalizeCurrencyOverrides(patch.currencyRates) : normalizeCurrencyOverrides(settings.currencyRates),
       language: patch.language !== undefined ? normalizeLanguageSetting(patch.language, settings.language) : normalizeLanguageSetting(settings.language),
       startAtLogin: loginItemEnabledHere() ? parseBoolean(patch.startAtLogin ?? settings.startAtLogin, false) : false,
       deepseekApiKey: patch.deepseekApiKey !== undefined ? normalizeDeepSeekApiKey(patch.deepseekApiKey) : (settings.deepseekApiKey || ''),
@@ -2305,6 +2396,12 @@ app.whenReady().then(() => {
       else exitTrayMode();
     } else if (settings.trayContent !== previousTrayContent || settings.currency !== previousCurrency) {
       updateTrayDisplay();
+    }
+    if (patch.currency !== undefined || patch.currencyRates !== undefined) {
+      applyEffectiveRates();               // sync: settingsForRenderer() below sees fresh effective map
+      updateTrayDisplay();
+      if (settings.discordRpcEnabled && latestStats) updateDiscordRpc(latestStats, settings.currency);
+      refreshExchangeRates();              // async: fetch if stale, then re-push
     }
     return settingsForRenderer();
   });
@@ -2680,7 +2777,7 @@ app.whenReady().then(() => {
 
 app.on('second-instance', focusExistingWindow);
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
-app.on('before-quit', () => { quitRequested = true; unregisterWindowToggleShortcut(); stopAll(); });
+app.on('before-quit', () => { quitRequested = true; if (rateRefreshTimer) clearInterval(rateRefreshTimer); unregisterWindowToggleShortcut(); stopAll(); });
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
   process.once(signal, requestAppQuit);
 }

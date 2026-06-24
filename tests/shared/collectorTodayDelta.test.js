@@ -5,6 +5,9 @@
 // tick instead of three, with no loss of accuracy.
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const test = require('node:test');
 const { EventEmitter } = require('node:events');
 
@@ -104,6 +107,11 @@ test('startCollector: watch ticks reuse the full-scan anchor, manual ticks resca
   const originalSpawn = childProcess.spawn;
   const calls = [];
   childProcess.spawn = recordingSpawn(calls, 50);
+  // Use an isolated shared data dir so the test doesn't pick up a real
+  // collector-anchor.json left by the actual app (anchor persistence).
+  const tmpShared = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-shared-'));
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmpShared;
   try {
     const { startCollector } = freshCollector();
     const updates = [];
@@ -135,6 +143,9 @@ test('startCollector: watch ticks reuse the full-scan anchor, manual ticks resca
     handle.stop();
   } finally {
     childProcess.spawn = originalSpawn;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    fs.rmSync(tmpShared, { recursive: true, force: true });
     delete require.cache[collectorPath];
   }
 });

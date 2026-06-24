@@ -390,16 +390,35 @@ async function collectUsageOnce(options) {
   // homes; watch tick reuses the frozen snapshot so the Windows-only delta anchor
   // above stays exact (issue #15). Merged before deriveClientStatus so a client
   // that only exists inside WSL still reports as active.
+  //
+  // Three WSL refresh modes:
+  // 1. refreshWsl (interval anchored tick): scan WSL fresh — the 5-minute interval
+  //    is too long to let WSL go stale, but re-scanning tokscale is avoided.
+  // 2. wslAnchor (watch anchored tick): reuse the frozen snapshot — WSL is heavy
+  //    and watch ticks fire every few seconds.
+  // 3. !anchorUsed (full scan): scan WSL as part of the complete rescan.
   const windowsPeriods = { today, month, allTime };
-  let wslBundle = options.wslAnchor || emptyWslBundle();
-  if (normalizedClients && !anchorUsed) {
-    wslBundle = await collectWsl({
-      clients: normalizedClients,
-      allTimeSince,
-      commandTimeoutMs,
-      runTokscale: runTokscaleFn,
-      logger: options.logger
-    });
+  let wslBundle = emptyWslBundle();
+  if (normalizedClients) {
+    if (options.refreshWsl) {
+      wslBundle = await collectWsl({
+        clients: normalizedClients,
+        allTimeSince,
+        commandTimeoutMs,
+        runTokscale: runTokscaleFn,
+        logger: options.logger
+      });
+    } else if (options.wslAnchor) {
+      wslBundle = options.wslAnchor;
+    } else if (!anchorUsed) {
+      wslBundle = await collectWsl({
+        clients: normalizedClients,
+        allTimeSince,
+        commandTimeoutMs,
+        runTokscale: runTokscaleFn,
+        logger: options.logger
+      });
+    }
   }
   today = mergePeriods(windowsPeriods.today, wslBundle.today);
   month = mergePeriods(windowsPeriods.month, wslBundle.month);
@@ -551,6 +570,17 @@ function wslPeriodsForPreview(wslAnchor, anchorDateKey, todayKey) {
   };
 }
 
+function configFingerprint(clientsCsv, allTimeSince) {
+  // Deterministic string that captures the config inputs anchor correctness
+  // depends on. When this changes, the persisted anchor is invalidated.
+  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}`;
+}
+
+// Force a full scan at least this often even when the anchor is otherwise
+// valid, so a long-running session periodically rescans month/allTime
+// and picks up any changes that the delta-derivation might miss.
+const FULL_SCAN_INTERVAL_MS = 60 * 60 * 1000;
+
 function startCollector(options) {
   const {
     clients, allTimeSince, commandTimeoutMs, deviceId, agentVersion, agentRuntime,
@@ -570,11 +600,37 @@ function startCollector(options) {
   // between full ticks (WSL is not scanned on watch ticks).
   let anchor = null;
   let wslAnchor = null;
+  let lastFullScanAt = 0;
   let pendingWaiters = [];
   let debounceTimer = null;
   let intervalTimer = null;
   let stopped = false;
   const watchers = [];
+
+  // On-disk anchor: persist full-scan snapshots so the collector can reuse
+  // month/allTime across restarts. On the first interval tick the anchor is
+  // valid for today and configFingerprint matches, only --today is scanned
+  // and month/allTime are derived via applyPeriodDelta.
+  const anchorPath = path.join(sharedDataDir(), 'collector-anchor.json');
+  try {
+    const saved = readJson(anchorPath, null);
+    if (saved && saved.dateKey === localTodayKey()) {
+      const fp = configFingerprint(clients, allTimeSince);
+      if (saved.configFingerprint === fp) {
+        anchor = { dateKey: saved.dateKey, today: saved.today, month: saved.month, allTime: saved.allTime };
+        wslAnchor = saved.wslBundle || null;
+        if (saved.fullScanAt) {
+          const parsed = Date.parse(saved.fullScanAt);
+          // Only trust timestamps that are valid and not in the future.
+          // Invalid, future, or missing timestamps leave lastFullScanAt at 0,
+          // which forces a full scan on the first interval tick (see loop()).
+          if (Number.isFinite(parsed) && parsed <= Date.now()) {
+            lastFullScanAt = parsed;
+          }
+        }
+      }
+    }
+  } catch (_) {}
 
   function resolvePendingWaiters() {
     const waiters = pendingWaiters;
@@ -587,6 +643,7 @@ function startCollector(options) {
     if (includeHistory) lastHistoryAt = Date.now();
     const todayKey = localTodayKey();
     const anchored = Boolean(tickOptions.todayOnly && anchor && anchor.dateKey === todayKey);
+    const refreshWsl = Boolean(tickOptions.refreshWsl);
     try {
       let captured = null;
       const summary = await collectUsageOnce({
@@ -602,6 +659,7 @@ function startCollector(options) {
         forceLimits: Boolean(tickOptions.forceLimits),
         todayOnlyAnchor: anchored ? anchor : null,
         wslAnchor: anchored ? wslAnchor : null,
+        refreshWsl: anchored ? refreshWsl : false,
         onAnchorComputed: (x) => { captured = x; },
         onProgress: (partial) => {
           if (!partial.today) return;
@@ -650,6 +708,23 @@ function startCollector(options) {
       if (stopped) return;
       if (!anchored && captured) {
         anchor = { dateKey: todayKey, today: captured.windowsPeriods.today, month: captured.windowsPeriods.month, allTime: captured.windowsPeriods.allTime };
+        wslAnchor = captured.wslBundle;
+        lastFullScanAt = Date.now();
+        try {
+          fs.mkdirSync(path.dirname(anchorPath), { recursive: true });
+          fs.writeFileSync(anchorPath, JSON.stringify({
+            dateKey: anchor.dateKey,
+            today: anchor.today,
+            month: anchor.month,
+            allTime: anchor.allTime,
+            wslBundle: wslAnchor,
+            configFingerprint: configFingerprint(clients, allTimeSince),
+            fullScanAt: new Date().toISOString()
+          }));
+        } catch (_) {}
+      } else if (anchored && refreshWsl && captured) {
+        // Interval anchored ticks refresh WSL independently; update the
+        // frozen snapshot so subsequent watch ticks see the fresh data.
         wslAnchor = captured.wslBundle;
       }
       await onUpdate?.(summary, reason);
@@ -722,7 +797,13 @@ function startCollector(options) {
 
   function loop() {
     if (stopped) return;
-    runTick('interval').finally(() => {
+    // Full scan at least once per FULL_SCAN_INTERVAL_MS so the anchor
+    // does not drift from reality over a long-running session.
+    // lastFullScanAt === 0 means no valid timestamp exists (cold start,
+    // unparseable, or future timestamp) — force a full scan immediately.
+    const fullScanDue = lastFullScanAt === 0 || Date.now() - lastFullScanAt >= FULL_SCAN_INTERVAL_MS;
+    const anchorToday = Boolean(!fullScanDue && anchor && anchor.dateKey === localTodayKey());
+    runTick('interval', anchorToday ? { todayOnly: true, refreshWsl: true } : {}).finally(() => {
       if (stopped) return;
       intervalTimer = setTimeout(loop, intervalMs);
     });
@@ -750,6 +831,7 @@ module.exports = {
   collectHistoryOnce,
   collectUsageOnce,
   clientDataDirPresence,
+  configFingerprint,
   deriveClientStatus,
   wslPeriodsForPreview,
   statusFromSignals,

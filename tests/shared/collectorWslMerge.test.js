@@ -55,3 +55,55 @@ test('watch tick reuses wslAnchor and does not rescan WSL', async () => {
   assert.equal(wslCalls, 0); // reused, not rescanned
   assert.equal(summary.today.clients.gemini, 9); // frozen WSL contribution present
 });
+
+test('interval anchored tick with refreshWsl rescans WSL and updates anchor', async () => {
+  let wslCalls = 0;
+  let capturedWsl = null;
+  const anchor = { dateKey: localTodayKey(), today: emptyPeriod(), month: emptyPeriod(), allTime: emptyPeriod() };
+  const firstBundle = bundleWith(9);
+  const secondBundle = bundleWith(15);
+  let useSecond = false;
+
+  const summary = await collectUsageOnce({
+    clients: 'claude,gemini',
+    allTimeSince: '2025-01-01',
+    commandTimeoutMs: 1000,
+    deviceId: 'dev1',
+    limitsEnabled: false,
+    runTokscale: windowsTokscale,
+    todayOnlyAnchor: anchor,
+    wslAnchor: bundleWith(3),     // frozen snapshot that would be used by a watch tick
+    refreshWsl: true,             // interval tick: refresh WSL independently
+    collectWslUsage: async () => {
+      wslCalls += 1;
+      const b = useSecond ? secondBundle : firstBundle;
+      useSecond = true;
+      return b;
+    },
+    onAnchorComputed: (x) => { capturedWsl = x.wslBundle; }
+  });
+
+  // WSL was rescanned (not reused from wslAnchor)
+  assert.equal(wslCalls, 1, 'interval anchored tick must rescan WSL');
+
+  // The frozen anchor had gemini=3, but fresh scan returned gemini=9
+  assert.equal(summary.today.clients.gemini, 9, 'fresh WSL data must be used');
+
+  // onAnchorComputed must reflect the freshly scanned WSL data
+  assert.equal(capturedWsl.today.clients.gemini, 9, 'anchor callback must have fresh WSL');
+
+  // Second call: verify refreshWsl=false (watch mode) reuses wslAnchor instead
+  wslCalls = 0;
+  await collectUsageOnce({
+    clients: 'claude,gemini',
+    allTimeSince: '2025-01-01',
+    commandTimeoutMs: 1000,
+    deviceId: 'dev1',
+    limitsEnabled: false,
+    runTokscale: windowsTokscale,
+    todayOnlyAnchor: anchor,
+    wslAnchor: capturedWsl,        // updated anchor from the interval refresh
+    collectWslUsage: async () => { wslCalls += 1; return bundleWith(0); }
+  });
+  assert.equal(wslCalls, 0, 'watch tick must reuse wslAnchor, not rescan');
+});
