@@ -101,6 +101,43 @@
     return { cell: 9, gap: 3, radius: 2 };
   }
 
+  function historyHasDays(history) {
+    return Array.isArray(history?.daily) && history.daily.length > 0;
+  }
+
+  // Which history source the home activity/trends module renders. Prefer the
+  // full-year homeHistory (fetched on demand), but fall back to the compact stats
+  // preview while it loads — an empty homeHistory must never shadow real preview
+  // data (#39: a cold-start fetch that raced the collector cached an empty result).
+  function pickHomeHistory(homeHistory, preview) {
+    return historyHasDays(homeHistory) ? homeHistory : (preview || { daily: [] });
+  }
+
+  // Stable signature of the preview's daily tail. Two previews with the same key
+  // describe the same fetch opportunity, so the full history is fetched at most
+  // once per distinct preview state — a failed/empty fetch (e.g. a transient
+  // /api/history error in hub mode while /api/stats preview has data) can't spin
+  // the render→fetch loop, since loadHomeHistory's finally always re-renders Home.
+  function historyPreviewKey(preview) {
+    const daily = Array.isArray(preview?.daily) ? preview.daily : [];
+    if (daily.length === 0) return '';
+    const last = daily[daily.length - 1] || {};
+    return `${daily.length}:${last.date || ''}:${last.tokens || 0}`;
+  }
+
+  // Whether loadHomeHistory should (re)fetch the full history. The first fetch can
+  // race the local collector at cold start and return empty; don't let that stick —
+  // refetch once the stats preview confirms history exists, but only when the preview
+  // has actually changed since the last attempt (so one bad fetch can't loop), stop
+  // once we hold the full data, and never poll a genuinely zero-usage account (#39).
+  function shouldFetchHomeHistory({ homeHistory, requested, preview, lastPreviewKey } = {}) {
+    if (historyHasDays(homeHistory)) return false;
+    if (!requested) return true;
+    const key = historyPreviewKey(preview);
+    if (!key) return false;
+    return key !== lastPreviewKey;
+  }
+
   function homeActivityWheelRoute(event) {
     if (event?.shiftKey) return 'activity-horizontal';
     const deltaX = Math.abs(Number(event?.deltaX || 0));
@@ -138,6 +175,9 @@
     homeLimitAccounts,
     homeModelRows,
     homeTrendSummary,
+    pickHomeHistory,
+    historyPreviewKey,
+    shouldFetchHomeHistory,
     homeActivityHeatmapLayout,
     homeActivityWheelRoute,
     homeActivityScrollTarget,

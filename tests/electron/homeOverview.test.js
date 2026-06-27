@@ -12,8 +12,14 @@ const {
   homeActivityWheelRoute,
   homeActivityScrollTarget,
   homeActivityScrollRecord,
-  homeTrendSummary
+  homeTrendSummary,
+  pickHomeHistory,
+  historyPreviewKey,
+  shouldFetchHomeHistory
 } = require('../../src/electron/renderer/homeOverview');
+
+const historyWithDays = { daily: [{ date: '2026-06-01', tokens: 10, cost: 1 }], monthly: [], summary: {} };
+const emptyHistory = { daily: [], monthly: [], summary: {} };
 
 test('Home activity heatmap is a scaled copy of the dashboard heatmap', () => {
   assert.deepEqual(homeActivityHeatmapLayout(), { cell: 9, gap: 3, radius: 2 });
@@ -161,4 +167,69 @@ test('homeActivityScrollRecord captures a user scroll and whether it sits at the
     scrollLeft: 399,
     followEnd: true
   });
+});
+
+test('pickHomeHistory prefers the full-year homeHistory when it has days', () => {
+  assert.equal(pickHomeHistory(historyWithDays, { daily: [{ date: '2026-06-02', tokens: 5 }] }), historyWithDays);
+});
+
+test('pickHomeHistory falls back to the preview rather than shadowing it with an empty homeHistory', () => {
+  // The #39 regression: a cold-start fetch that raced the collector cached an empty
+  // homeHistory, which then hid the (now populated) stats preview behind `||`.
+  const preview = { daily: [{ date: '2026-06-02', tokens: 5 }] };
+  assert.equal(pickHomeHistory(emptyHistory, preview), preview);
+  assert.equal(pickHomeHistory(null, preview), preview);
+});
+
+test('pickHomeHistory returns an empty-daily shape when both sources are empty', () => {
+  assert.deepEqual(pickHomeHistory(null, null), { daily: [] });
+  assert.equal(pickHomeHistory(emptyHistory, emptyHistory), emptyHistory);
+});
+
+test('historyPreviewKey is empty for no days and changes as the daily tail moves', () => {
+  assert.equal(historyPreviewKey(null), '');
+  assert.equal(historyPreviewKey(emptyHistory), '');
+  const key = historyPreviewKey(historyWithDays);
+  assert.notEqual(key, '');
+  assert.equal(historyPreviewKey(historyWithDays), key); // stable for the same data
+  assert.notEqual(historyPreviewKey({ daily: [{ date: '2026-06-02', tokens: 99 }] }), key);
+});
+
+test('shouldFetchHomeHistory fetches on the first request', () => {
+  assert.equal(shouldFetchHomeHistory({ homeHistory: null, requested: false, preview: null }), true);
+});
+
+test('shouldFetchHomeHistory refetches when an empty result raced the collector', () => {
+  // Requested once during the race (preview was empty → lastPreviewKey ''), but the
+  // preview now shows history exists — fetch again instead of sticking on the empty result.
+  assert.equal(shouldFetchHomeHistory({
+    homeHistory: emptyHistory, requested: true, preview: historyWithDays, lastPreviewKey: ''
+  }), true);
+});
+
+test('shouldFetchHomeHistory does not refetch against the preview it already tried', () => {
+  // A failed/empty full-history fetch must not loop: loadHomeHistory's finally always
+  // re-renders Home, so refetching the same preview state would spin the IPC path.
+  const key = historyPreviewKey(historyWithDays);
+  assert.equal(shouldFetchHomeHistory({
+    homeHistory: emptyHistory, requested: true, preview: historyWithDays, lastPreviewKey: key
+  }), false);
+});
+
+test('shouldFetchHomeHistory retries once the preview changes after a failed attempt', () => {
+  const staleKey = historyPreviewKey(historyWithDays);
+  const newerPreview = { daily: [{ date: '2026-06-02', tokens: 42 }] };
+  assert.equal(shouldFetchHomeHistory({
+    homeHistory: emptyHistory, requested: true, preview: newerPreview, lastPreviewKey: staleKey
+  }), true);
+});
+
+test('shouldFetchHomeHistory stops once the full history is held', () => {
+  assert.equal(shouldFetchHomeHistory({ homeHistory: historyWithDays, requested: true, preview: historyWithDays }), false);
+});
+
+test('shouldFetchHomeHistory never polls a zero-usage account', () => {
+  // Requested once, still no preview data — nothing to fetch, so don't poll on every render.
+  assert.equal(shouldFetchHomeHistory({ homeHistory: emptyHistory, requested: true, preview: emptyHistory }), false);
+  assert.equal(shouldFetchHomeHistory({ homeHistory: null, requested: true, preview: null }), false);
 });
