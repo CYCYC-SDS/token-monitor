@@ -6,12 +6,12 @@ const os = require('node:os');
 const path = require('node:path');
 const { app, BrowserWindow, globalShortcut, ipcMain, nativeImage, screen, session, shell } = require('electron');
 const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFilePath, sharedDataDir } = require('../shared/config');
-const { safeLog, safeWarn, installSafeStdout } = require('../shared/safeStdio');
+const { installSafeStdout } = require('../shared/safeStdio');
 const { appVersion } = require('../shared/appVersion');
 
 // Install EPIPE suppression before anything that might log. Without this,
-// a closed parent pipe turns the next log call into an unhandled rejection
-// and Electron pops a "JavaScript error in the main process" dialog.
+// a closed parent pipe turns the next log call into an unhandled 'error'
+// event and Electron pops a "JavaScript error in the main process" dialog.
 installSafeStdout();
 const { DEFAULT_CLIENTS, clientsCsvForSetting } = require('../shared/clientTracking');
 const { startCollector, lookupModelPricing } = require('../shared/collector');
@@ -1021,16 +1021,16 @@ async function startEmbeddedHub() {
       host: '0.0.0.0',
       secret: settings.hubHostSecret,
       dataFile: hubDataFile(),
-      logger: { error: (err) => safeLog(`[hub] ${err?.message || err}`) }
+      logger: { error: (err) => console.log(`[hub] ${err?.message || err}`) }
     });
     await hub.start();
     embeddedHub = { hub, port };
-    safeLog(`[hub] listening on 0.0.0.0:${port}`);
+    console.log(`[hub] listening on 0.0.0.0:${port}`);
     sendHubPush({ type: 'listening', info: getHubInfo() });
     return embeddedHub;
   } catch (error) {
     embeddedHubError = { code: error.code || 'error', message: error.message, port };
-    safeLog(`[hub] failed to start on port ${port}: ${error.message}`);
+    console.log(`[hub] failed to start on port ${port}: ${error.message}`);
     sendHubPush({ type: 'error', info: getHubInfo() });
     return null;
   }
@@ -1071,7 +1071,7 @@ async function postToHub(summary) {
   const stale = settings.lastPostedDeviceId;
   if (stale && stale !== summary.deviceId) {
     try { await deleteDeviceFromHub(stale); }
-    catch (error) { safeLog(`[sync] cleanup of old deviceId ${stale} failed: ${error.message}`); }
+    catch (error) { console.log(`[sync] cleanup of old deviceId ${stale} failed: ${error.message}`); }
   }
   const url = `${hubUrl.replace(/\/$/, '')}/api/ingest`;
   const response = await fetch(url, {
@@ -1121,11 +1121,11 @@ function startSyncCollector() {
       try {
         await postToHub(visibleSummary);
       } catch (error) {
-        safeLog(`[sync-collector] post failed: ${error.message}`);
+        console.log(`[sync-collector] post failed: ${error.message}`);
       }
     },
-    onError: (error, reason) => safeLog(`[sync-collector] ${reason}: ${error.message}`),
-    logger: (msg) => safeLog(`[sync-collector] ${msg}`)
+    onError: (error, reason) => console.log(`[sync-collector] ${reason}: ${error.message}`),
+    logger: (msg) => console.log(`[sync-collector] ${msg}`)
   });
 }
 
@@ -1169,11 +1169,11 @@ function startHostCollector() {
           saveSettings();
         }
       } catch (error) {
-        safeLog(`[host-ingest] failed: ${error.message}`);
+        console.log(`[host-ingest] failed: ${error.message}`);
       }
     },
-    onError: (error, reason) => safeLog(`[host-collector] ${reason}: ${error.message}`),
-    logger: (msg) => safeLog(`[host-collector] ${msg}`)
+    onError: (error, reason) => console.log(`[host-collector] ${reason}: ${error.message}`),
+    logger: (msg) => console.log(`[host-collector] ${msg}`)
   });
 }
 
@@ -1330,7 +1330,7 @@ function startLocalCollector() {
     onError: (error, reason) => {
       sendStatus(false, { reason: `${reason}:${error.message}` });
     },
-    logger: (msg) => safeLog(`[collector] ${msg}`)
+    logger: (msg) => console.log(`[collector] ${msg}`)
   });
 }
 
@@ -1529,10 +1529,10 @@ function configureWindowToggleShortcut() {
       return true;
     }
   } catch (error) {
-    safeLog(`[shortcut] failed to register ${shortcut}: ${error.message}`);
+    console.log(`[shortcut] failed to register ${shortcut}: ${error.message}`);
     return false;
   }
-  safeLog(`[shortcut] failed to register ${shortcut}`);
+  console.log(`[shortcut] failed to register ${shortcut}`);
   return false;
 }
 
@@ -1634,7 +1634,7 @@ function startMode() {
       startLocalCollector();
     }
   }).catch((err) => {
-    safeLog(`[mode] reconciliation failed: ${err?.message || err}`);
+    console.log(`[mode] reconciliation failed: ${err?.message || err}`);
   });
 }
 
@@ -1695,7 +1695,7 @@ function regenerateTokscalePricing() {
       sidecarPath: managedPricingSidecarPath()
     });
   } catch (error) {
-    safeWarn(`[pricing] failed to write custom-pricing.json: ${error.message}`);
+    console.warn(`[pricing] failed to write custom-pricing.json: ${error.message}`);
   }
 }
 
@@ -1707,7 +1707,7 @@ async function refreshAfterPricingChange() {
       await syncCollectorHandle.tick('manual', {});
     }
   } catch (error) {
-    safeWarn(`[pricing] refresh after pricing change failed: ${error.message}`);
+    console.warn(`[pricing] refresh after pricing change failed: ${error.message}`);
   }
 }
 
@@ -1731,7 +1731,7 @@ async function checkTokscaleNpm({ silent = false } = {}) {
     return publicResult;
   } catch (error) {
     if (silent) {
-      safeLog(`[tokscale] npm check failed: ${error.message}`);
+      console.log(`[tokscale] npm check failed: ${error.message}`);
       return { supported: true, error: null, silent: true };
     }
     return { supported: true, error: error.message };
@@ -1811,11 +1811,11 @@ async function runAppUpdateCheck({ force = false } = {}) {
       appUpdateLastError = null;
     } else {
       appUpdateLastError = force ? (result.error || 'Update check failed') : null;
-      if (!force) safeWarn('App update check failed:', result.error);
+      if (!force) console.warn('App update check failed:', result.error);
     }
   } catch (error) {
     appUpdateLastError = force ? (error.message || String(error)) : null;
-    if (!force) safeWarn('App update check threw:', error);
+    if (!force) console.warn('App update check threw:', error);
   } finally {
     appUpdateCheckInFlight = false;
     sendAppUpdatePush();
@@ -1896,13 +1896,13 @@ function loadWindowFile(target, options = {}) {
     });
   }
   target.webContents.once('did-fail-load', (_event, code, description) => {
-    safeLog(`[window] renderer load failed: ${code} ${description}`);
+    console.log(`[window] renderer load failed: ${code} ${description}`);
     reveal();
   });
   const filePath = path.join(__dirname, 'renderer', 'index.html');
   const load = options.query ? target.loadFile(filePath, { query: options.query }) : target.loadFile(filePath);
   load.catch((error) => {
-    safeLog(`[window] renderer load failed: ${error.message}`);
+    console.log(`[window] renderer load failed: ${error.message}`);
     reveal();
   });
 }
@@ -2066,7 +2066,7 @@ function createDashboardWindow() {
   win.once('ready-to-show', () => win.show());
   win.on('closed', () => { dashboardWindow = null; });
   win.loadFile(path.join(__dirname, 'renderer', 'dashboard.html'))
-    .catch((error) => safeLog(`[dashboard] load failed: ${error.message}`));
+    .catch((error) => console.log(`[dashboard] load failed: ${error.message}`));
   return win;
 }
 
@@ -2147,7 +2147,7 @@ app.whenReady().then(() => {
   createWindow();
   syncLoginItemSettingFromOs();
   configureWindowToggleShortcut();
-  cleanupStaleStaging().catch((error) => safeLog(`[tokscale] staging cleanup failed: ${error.message}`));
+  cleanupStaleStaging().catch((error) => console.log(`[tokscale] staging cleanup failed: ${error.message}`));
   ensureTray();
   if (settings.trayMode) enterTrayMode();
   regenerateTokscalePricing();
