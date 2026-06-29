@@ -2045,6 +2045,10 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   -webkit-mask-image: url(../../../assets/icons/copilot.svg);
   mask-image: url(../../../assets/icons/copilot.svg);
 }
+.limit-icon-kiro {
+  -webkit-mask-image: url(../../../assets/icons/kiro.svg);
+  mask-image: url(../../../assets/icons/kiro.svg);
+}
 .row-label {
   display: grid;
   min-width: 0;
@@ -2370,6 +2374,16 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   color: var(--muted);
   font-size: 9px;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.limit-reset-split {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.limit-detail {
+  color: var(--text);
+  opacity: 0.7;
   white-space: nowrap;
 }
 .limit-window-note {

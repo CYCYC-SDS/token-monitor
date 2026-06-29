@@ -20,6 +20,8 @@ const { minimaxToken, minimaxBaseUrl, parseMinimaxTiers, fetchMinimaxLimits } = 
 const grokLimits = require('./grokLimits');
 const copilotLimits = require('./copilotLimits');
 const { copilotToken, fetchCopilotLimits } = copilotLimits;
+const kiroLimits = require('./kiroLimits');
+const { parseKiroUsage, fetchKiroLimits } = kiroLimits;
 const {
   grokCredential,
   readAuthJson,
@@ -30,7 +32,7 @@ const {
   fetchGrokLimits
 } = grokLimits;
 
-const LIMIT_PROVIDER_IDS = ['claude', 'codex', 'cursor', 'antigravity', 'opencode', 'deepseek', 'minimax', 'grok', 'copilot'];
+const LIMIT_PROVIDER_IDS = ['claude', 'codex', 'cursor', 'antigravity', 'opencode', 'deepseek', 'minimax', 'grok', 'copilot', 'kiro'];
 const LIMIT_REFRESH_VALUES = new Set([60_000, 120_000, 300_000, 900_000, 1_800_000]);
 const CLAUDE_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const CLAUDE_OAUTH_TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';
@@ -2041,6 +2043,7 @@ async function collectLimitsOnce(options = {}, deps = {}) {
     minimax: (providerOptions) => minimaxLimits.fetchMinimaxLimits(providerOptions, deps),
     grok: (providerOptions) => grokLimits.fetchGrokLimits(providerOptions, deps),
     copilot: (providerOptions) => copilotLimits.fetchCopilotLimits(providerOptions, deps),
+    kiro: (providerOptions) => kiroLimits.fetchKiroLimits(providerOptions, deps),
     ...(deps.providerFetchers || {})
   };
   const providers = [];
@@ -2278,6 +2281,8 @@ module.exports = {
   fetchGrokLimits,
   copilotToken,
   fetchCopilotLimits,
+  parseKiroUsage,
+  fetchKiroLimits,
   mapClaudeCliUsageToProvider,
   mapClaudeUsageToProvider,
   mapCodexRateLimitsToProvider,

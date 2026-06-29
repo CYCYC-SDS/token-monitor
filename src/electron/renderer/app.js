@@ -66,7 +66,8 @@ const LIMIT_PROVIDERS = [
   { id: 'deepseek', label: 'DeepSeek' },
   { id: 'minimax', label: 'Minimax' },
   { id: 'grok', label: 'Grok' },
-  { id: 'copilot', label: 'GitHub Copilot' }
+  { id: 'copilot', label: 'GitHub Copilot' },
+  { id: 'kiro', label: 'Kiro' }
 ];
 const DEFAULT_LIMIT_PROVIDER_ORDER = LIMIT_PROVIDERS.map((provider) => provider.id).join(',');
 const limitProviderOrderApi = window.TokenMonitorLimitProviderOrder;
@@ -116,6 +117,7 @@ const LIMIT_CAPABILITY_TAG_KEYS = {
   Disabled: 'settings.limits.status.disabled',
   'Sign in again': 'settings.limits.status.signInAgain',
   'Run grok login': 'settings.limits.status.runGrokLogin',
+  'Run kiro-cli login': 'settings.limits.status.runKiroLogin',
   'Re-login': 'settings.limits.status.relogin',
   Limited: 'settings.limits.status.limited',
   'Usage API limited': 'settings.limits.status.usageApiLimited',
@@ -1040,6 +1042,28 @@ function formatLimitAmount(value) {
   return `$${number.toFixed(2)}`;
 }
 
+// "remaining/total" count for windows that expose absolute units (Kiro credits).
+// Trims trailing zeros so 49.91/50 and 18/50 both read cleanly. Empty when the
+// window has no used/limit pair.
+function formatLimitCount(window) {
+  const used = Number(window?.used);
+  const limit = Number(window?.limit);
+  if (!Number.isFinite(used) || !Number.isFinite(limit) || limit <= 0) return '';
+  const trim = (n) => Number(Math.max(0, n).toFixed(2)).toString();
+  return `${trim(limit - used)}/${trim(limit)}`;
+}
+
+// One-line Overage value: "12.5 credits · $3.20" (credits used, then est. cost).
+// Either piece may be absent; the row only renders when at least one is present.
+function formatKiroOverageValue(window) {
+  const parts = [];
+  const credits = Number(window?.used);
+  if (Number.isFinite(credits)) parts.push(`${Number(credits.toFixed(2))} credits`);
+  const cost = Number(window?.remaining);
+  if (Number.isFinite(cost)) parts.push(formatLimitAmount(cost));
+  return parts.join(' · ');
+}
+
 const CURRENCY_SYMBOLS = { CNY: '¥', USD: '$' };
 
 function formatMoney(value, currency) {
@@ -1076,7 +1100,7 @@ function balanceRemainingWindow(balance) {
   return { remainingPercent };
 }
 
-function limitWindowNode(label, window, color, tone = 1, valueOverride = null) {
+function limitWindowNode(label, window, color, tone = 1, valueOverride = null, detailText = '') {
   const remaining = Number(window?.remainingPercent);
   const used = Number(window?.usedPercent);
   const showMeter = window?.showMeter !== false;
@@ -1107,7 +1131,20 @@ function limitWindowNode(label, window, color, tone = 1, valueOverride = null) {
   meter.append(fill);
   const reset = document.createElement('div');
   reset.className = 'limit-reset';
-  reset.textContent = formatReset(window?.resetsAt) || window?.resetDescription || '';
+  const resetText = formatReset(window?.resetsAt) || window?.resetDescription || '';
+  if (detailText) {
+    // Keep the reset text left-aligned (consistent with every other provider)
+    // and add the absolute count on the right, under the top-line percentage.
+    reset.classList.add('limit-reset-split');
+    const resetSpan = document.createElement('span');
+    resetSpan.textContent = resetText;
+    const detailSpan = document.createElement('span');
+    detailSpan.className = 'limit-detail';
+    detailSpan.textContent = detailText;
+    reset.append(resetSpan, detailSpan);
+  } else {
+    reset.textContent = resetText;
+  }
   if (showMeter) {
     item.append(text, meter, reset);
   } else {
@@ -1276,6 +1313,24 @@ function renderProviderWindows(provider, color) {
       const node = limitWindowNode(billing?.label || 'Monthly', billing, color, 0.68);
       node.classList.add('limit-window-wide');
       windows.append(node);
+    }
+  } else if (provider.provider === 'kiro') {
+    // Kiro exposes monthly credits (plus an optional bonus pool), both billing
+    // windows. Render them full-width like Copilot's quota windows.
+    windows.classList.add('limit-windows-kiro');
+    const billingWindows = windowsForKind(provider, 'billing');
+    for (const billing of billingWindows) {
+      if (billing?.showMeter === false) {
+        // Overage: a single compact line like Cursor's "Credits $0.00" (no bar,
+        // no reset) with the credits used and estimated cost joined on the right.
+        const node = limitWindowNode(billing.label || 'Overage', billing, color, 0.6, formatKiroOverageValue(billing));
+        node.classList.add('limit-window-wide', 'limit-window-no-reset');
+        windows.append(node);
+      } else {
+        const node = limitWindowNode(billing?.label || 'Credits', billing, color, 0.68, null, formatLimitCount(billing));
+        node.classList.add('limit-window-wide');
+        windows.append(node);
+      }
     }
   } else {
     // Default: render only the windows the provider actually has. Providers

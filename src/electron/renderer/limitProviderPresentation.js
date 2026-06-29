@@ -23,7 +23,8 @@
     deepseek: { api: 'API' },
     minimax: { api: 'API' },
     grok: { rpc: 'CLI', web: 'Web' },
-    copilot: { api: 'API' }
+    copilot: { api: 'API' },
+    kiro: { cli: 'CLI' }
   };
 
   const CODEX_RPC_DETAIL_LABELS = {
@@ -42,7 +43,8 @@
     deepseek: ['Pay-as-you-go', 'API key'],
     minimax: ['Token Plan', 'API key'],
     grok: ['Auto', 'CLI/Web'],
-    copilot: ['Manual login', 'API']
+    copilot: ['Manual login', 'API'],
+    kiro: ['Auto', 'CLI']
   };
 
   // Capability hint -> the status label it would duplicate. When that status is
@@ -142,6 +144,7 @@
       if (providerName === 'cursor' || providerName === 'copilot') return { label: 'Sign in', tone: 'setup' };
       if (providerName === 'deepseek' || providerName === 'minimax') return { label: 'Add API key', tone: 'setup' };
       if (providerName === 'grok') return { label: 'Run grok login', tone: 'setup' };
+      if (providerName === 'kiro') return { label: 'Run kiro-cli login', tone: 'setup' };
       return { label: 'Not set up', tone: 'setup' };
     }
     return status ? { label: 'Error', tone: 'warn' } : null;
