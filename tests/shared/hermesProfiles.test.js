@@ -61,20 +61,20 @@ test('discoverHermesProfileScanPaths returns profile dirs that contain state.db'
   const paths = discoverHermesProfileScanPaths(hermesHome, {
     existsSync: (target) => {
       if (target === path.join(hermesHome, 'profiles')) return true;
-      return target.endsWith(`${path.sep}02${path.sep}state.db`)
-        || target.endsWith(`${path.sep}wiki-sys${path.sep}state.db`);
+      return target.endsWith(`${path.sep}lab-a${path.sep}state.db`)
+        || target.endsWith(`${path.sep}research${path.sep}state.db`);
     },
     readdirSync: () => [
-      { name: '02', isDirectory: () => true },
+      { name: 'lab-a', isDirectory: () => true },
       { name: 'empty', isDirectory: () => true },
       { name: 'notes.txt', isDirectory: () => false },
-      { name: 'wiki-sys', isDirectory: () => true }
+      { name: 'research', isDirectory: () => true }
     ]
   });
 
   assert.deepEqual(paths, [
-    path.join(hermesHome, 'profiles', '02'),
-    path.join(hermesHome, 'profiles', 'wiki-sys')
+    path.join(hermesHome, 'profiles', 'lab-a'),
+    path.join(hermesHome, 'profiles', 'research')
   ]);
 });
 
@@ -88,15 +88,15 @@ test('tokscaleEnvWithHermesProfiles injects hermes profile dirs into TOKSCALE_EX
       homeDir: 'C:\\Users\\u',
       platform: 'win32',
       existsSync: (target) => target.endsWith(`${path.sep}profiles`)
-        || target.endsWith(`${path.sep}02${path.sep}state.db`),
-      readdirSync: () => [{ name: '02', isDirectory: () => true }]
+        || target.endsWith(`${path.sep}lab-a${path.sep}state.db`),
+      readdirSync: () => [{ name: 'lab-a', isDirectory: () => true }]
     }
   );
 
   assert.equal(env.FOO, 'bar');
   assert.match(
     env.TOKSCALE_EXTRA_DIRS,
-    /codex:C:\\extra,hermes:C:\\Users\\u\\AppData\\Local\\hermes\\profiles\\02/
+    /codex:C:\\extra,hermes:C:\\Users\\u\\AppData\\Local\\hermes\\profiles\\lab-a/
   );
 });
 

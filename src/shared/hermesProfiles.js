@@ -32,7 +32,7 @@ function discoverHermesProfileScanPaths(hermesHome, deps = {}) {
   if (!existsSync(profilesDir)) return [];
 
   const paths = [];
-  let entries = [];
+  let entries;
   try {
     entries = readdirSync(profilesDir, { withFileTypes: true });
   } catch (_) {
