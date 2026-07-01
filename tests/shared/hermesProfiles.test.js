@@ -93,11 +93,9 @@ test('tokscaleEnvWithHermesProfiles injects hermes profile dirs into TOKSCALE_EX
     }
   );
 
+  const profileDir = path.join(hermesHome, 'profiles', 'lab-a');
   assert.equal(env.FOO, 'bar');
-  assert.match(
-    env.TOKSCALE_EXTRA_DIRS,
-    /codex:C:\\extra,hermes:C:\\Users\\u\\AppData\\Local\\hermes\\profiles\\lab-a/
-  );
+  assert.equal(env.TOKSCALE_EXTRA_DIRS, `codex:C:\\extra,hermes:${profileDir}`);
 });
 
 test('tokscaleEnvWithHermesProfiles leaves env untouched when hermes is not enabled', () => {
