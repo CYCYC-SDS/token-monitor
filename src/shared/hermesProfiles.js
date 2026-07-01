@@ -8,13 +8,18 @@ function resolveHermesHome({ env = process.env, homeDir, platform = process.plat
   const fromEnv = String(env.HERMES_HOME || '').trim();
   if (fromEnv) return fromEnv;
 
+  const dotHermes = path.join(home, '.hermes');
+  if (existsSync(path.join(dotHermes, 'state.db'))) return dotHermes;
+
+  // Windows native installs often land in %LOCALAPPDATA%\hermes instead of
+  // ~/.hermes. Resolve via the active home dir so mocked homedirs in tests do
+  // not leak the developer machine's real AppData path.
   if (platform === 'win32') {
-    const localAppData = String(env.LOCALAPPDATA || '').trim() || path.join(home, 'AppData', 'Local');
-    const winNative = path.join(localAppData, 'hermes');
+    const winNative = path.join(home, 'AppData', 'Local', 'hermes');
     if (existsSync(path.join(winNative, 'state.db'))) return winNative;
   }
 
-  return path.join(home, '.hermes');
+  return dotHermes;
 }
 
 function discoverHermesProfileScanPaths(hermesHome, deps = {}) {

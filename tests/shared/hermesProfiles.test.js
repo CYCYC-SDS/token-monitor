@@ -19,17 +19,33 @@ test('resolveHermesHome prefers HERMES_HOME when set', () => {
   );
 });
 
-test('resolveHermesHome falls back to Windows LocalAppData when native state.db exists', () => {
+test('resolveHermesHome prefers home-relative .hermes before Windows LocalAppData', () => {
   const homeDir = 'C:\\Users\\u';
-  const localAppData = 'C:\\Users\\u\\AppData\\Local';
+  const dotHermes = path.join(homeDir, '.hermes');
+  const winNative = path.join(homeDir, 'AppData', 'Local', 'hermes');
   assert.equal(
     resolveHermesHome({
-      env: { LOCALAPPDATA: localAppData },
+      env: {},
       homeDir,
       platform: 'win32',
-      existsSync: (target) => target === path.join(localAppData, 'hermes', 'state.db')
+      existsSync: (target) => target === path.join(dotHermes, 'state.db')
+        || target === path.join(winNative, 'state.db')
     }),
-    path.join(localAppData, 'hermes')
+    dotHermes
+  );
+});
+
+test('resolveHermesHome falls back to Windows LocalAppData when native state.db exists', () => {
+  const homeDir = 'C:\\Users\\u';
+  const winNative = path.join(homeDir, 'AppData', 'Local', 'hermes');
+  assert.equal(
+    resolveHermesHome({
+      env: {},
+      homeDir,
+      platform: 'win32',
+      existsSync: (target) => target === path.join(winNative, 'state.db')
+    }),
+    winNative
   );
 });
 

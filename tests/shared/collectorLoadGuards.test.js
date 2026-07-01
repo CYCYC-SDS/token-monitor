@@ -173,6 +173,31 @@ test('watchPathsForClients watches Pi (incl. Oh My Pi), Zed (incl. native macOS)
   }
 });
 
+test('watchPathsForClients watches Hermes profile dirs alongside the home root', () => {
+  const tmp = withTmpHome([path.join('.hermes', 'hermes-agent', 'node_modules')]);
+  const hermesRoot = path.join(tmp, '.hermes');
+  fs.writeFileSync(path.join(hermesRoot, 'state.db'), '');
+  const profileDir = path.join(hermesRoot, 'profiles', 'research');
+  fs.mkdirSync(profileDir, { recursive: true });
+  fs.writeFileSync(path.join(profileDir, 'state.db'), '');
+  const originalHomedir = os.homedir;
+  const previousHermesHome = process.env.HERMES_HOME;
+  os.homedir = () => tmp;
+  try {
+    delete process.env.HERMES_HOME;
+    const { clientDataDirPresence, watchPathsForClients } = freshCollector();
+    const dirs = watchPathsForClients('hermes');
+    assert.deepEqual(dirs, [hermesRoot, profileDir]);
+    assert.deepEqual(clientDataDirPresence('hermes'), { hermes: true });
+  } finally {
+    os.homedir = originalHomedir;
+    if (previousHermesHome === undefined) delete process.env.HERMES_HOME;
+    else process.env.HERMES_HOME = previousHermesHome;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('watchPathsForClients watches the Hermes home dir so new state.db sidecars are picked up', () => {
   // Hermes keeps usage in a single SQLite db at the root of HERMES_HOME, but that
   // dir also holds the Desktop App runtime (hermes-agent/node_modules/venv: GBs /
