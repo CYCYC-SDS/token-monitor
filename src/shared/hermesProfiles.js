@@ -1,0 +1,95 @@
+'use strict';
+
+const fs = require('node:fs');
+const path = require('node:path');
+
+function resolveHermesHome({ env = process.env, homeDir, platform = process.platform, existsSync = fs.existsSync } = {}) {
+  const home = homeDir || require('node:os').homedir();
+  const fromEnv = String(env.HERMES_HOME || '').trim();
+  if (fromEnv) return fromEnv;
+
+  if (platform === 'win32') {
+    const localAppData = String(env.LOCALAPPDATA || '').trim() || path.join(home, 'AppData', 'Local');
+    const winNative = path.join(localAppData, 'hermes');
+    if (existsSync(path.join(winNative, 'state.db'))) return winNative;
+  }
+
+  return path.join(home, '.hermes');
+}
+
+function discoverHermesProfileScanPaths(hermesHome, deps = {}) {
+  const existsSync = deps.existsSync || fs.existsSync;
+  const readdirSync = deps.readdirSync || fs.readdirSync;
+  const root = String(hermesHome || '').trim();
+  if (!root) return [];
+
+  const profilesDir = path.join(root, 'profiles');
+  if (!existsSync(profilesDir)) return [];
+
+  const paths = [];
+  let entries = [];
+  try {
+    entries = readdirSync(profilesDir, { withFileTypes: true });
+  } catch (_) {
+    return [];
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const profileDir = path.join(profilesDir, entry.name);
+    if (existsSync(path.join(profileDir, 'state.db'))) paths.push(profileDir);
+  }
+
+  return paths.sort((a, b) => a.localeCompare(b));
+}
+
+function hermesProfileWatchDirs(hermesHome, deps = {}) {
+  return discoverHermesProfileScanPaths(hermesHome, deps);
+}
+
+function clientsCsvIncludesHermes(clientsCsv) {
+  return String(clientsCsv || '')
+    .split(',')
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean)
+    .includes('hermes');
+}
+
+function mergeTokscaleExtraDirs(env, additions) {
+  const base = env && typeof env === 'object' ? { ...env } : {};
+  const extra = (additions || []).filter(Boolean);
+  if (extra.length === 0) return base;
+
+  const existing = String(base.TOKSCALE_EXTRA_DIRS || '').trim();
+  const merged = existing
+    ? `${existing},${extra.join(',')}`
+    : extra.join(',');
+  base.TOKSCALE_EXTRA_DIRS = merged;
+  return base;
+}
+
+function tokscaleEnvWithHermesProfiles(env, clientsCsv, opts = {}) {
+  if (!clientsCsvIncludesHermes(clientsCsv)) return env;
+  const hermesHome = resolveHermesHome(opts);
+  const profileDirs = discoverHermesProfileScanPaths(hermesHome, opts);
+  if (profileDirs.length === 0) return env;
+  const additions = profileDirs.map((dir) => `hermes:${dir}`);
+  return mergeTokscaleExtraDirs(env, additions);
+}
+
+function tokscaleEnvFromSpawnArgs(env, userArgs, opts = {}) {
+  const args = Array.isArray(userArgs) ? userArgs : [];
+  const clientIndex = args.indexOf('--client');
+  if (clientIndex < 0 || clientIndex >= args.length - 1) return env;
+  return tokscaleEnvWithHermesProfiles(env, args[clientIndex + 1], opts);
+}
+
+module.exports = {
+  clientsCsvIncludesHermes,
+  discoverHermesProfileScanPaths,
+  hermesProfileWatchDirs,
+  mergeTokscaleExtraDirs,
+  resolveHermesHome,
+  tokscaleEnvFromSpawnArgs,
+  tokscaleEnvWithHermesProfiles
+};

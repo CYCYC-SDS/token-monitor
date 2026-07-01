@@ -12,6 +12,7 @@ const { normalizeClientsCsv } = require('./clientTracking');
 const { tokscalePackageNameForPlatform, tokscalePlatformKey } = require('./tokscalePlatform');
 const { applyPeriodDelta, emptyPeriod, extractUsageFromTokscale, mergePeriods } = require('./usage');
 const { collectWslUsage: collectWslUsageImpl, emptyWslBundle, probeWslState: probeWslStateImpl } = require('./wslUsage');
+const { hermesProfileWatchDirs, resolveHermesHome, tokscaleEnvFromSpawnArgs } = require('./hermesProfiles');
 const { parseGraphResult, normalizeHistory } = require('./history');
 const { collectLimitsOnce, createLimitsCollector } = require('./limitCollector');
 const cursorAuth = require('./cursorAuth');
@@ -109,10 +110,14 @@ function parseJsonOutput(stdout) {
   throw new Error(`Could not parse tokscale JSON output: ${text.slice(0, 300)}`);
 }
 
-function spawnTokscaleJson(userArgs, commandTimeoutMs) {
+function spawnTokscaleJson(userArgs, commandTimeoutMs, spawnOpts = {}) {
   const { bin, prefixArgs, env } = tokscaleCommand();
+  const childEnv = tokscaleEnvFromSpawnArgs(env, userArgs, {
+    env,
+    homeDir: spawnOpts.homeDir || os.homedir()
+  });
   return new Promise((resolve, reject) => {
-    const child = spawn(bin, [...prefixArgs, ...userArgs], { env, windowsHide: true });
+    const child = spawn(bin, [...prefixArgs, ...userArgs], { env: childEnv, windowsHide: true });
     let stdout = '';
     let stderr = '';
     const timeout = setTimeout(() => { child.kill('SIGTERM'); reject(new Error(`tokscale timed out after ${commandTimeoutMs}ms`)); }, commandTimeoutMs);
@@ -534,7 +539,8 @@ function clientWatchCandidates(clientsCsv) {
   const add = (client, ...dirs) => { if (enabled.has(client)) byClient[client] = dirs; };
   add('claude', path.join(home, '.claude', 'projects'), path.join(home, '.claude', 'transcripts'));
   add('codex', path.join(home, '.codex', 'sessions'));
-  add('hermes', process.env.HERMES_HOME || path.join(home, '.hermes'));
+  const hermesHome = resolveHermesHome({ env: process.env, homeDir: home });
+  add('hermes', hermesHome, ...hermesProfileWatchDirs(hermesHome));
   add('opencode', path.join(home, '.local', 'share', 'opencode'));
   add('openclaw', path.join(home, '.openclaw', 'agents'));
   add('cursor', path.join(home, '.config', 'tokscale', 'cursor-cache'));
