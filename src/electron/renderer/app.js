@@ -742,13 +742,16 @@ function rowTemplate(rowData) {
   return row;
 }
 
-function updateRow(row, { name, subtitle, detail, value, cost, max, color, stale, platform, local, client, kind, cacheReadTokens, outputTokens }) {
+const tokenBreakdownApi = window.TokenMonitorTokenBreakdown;
+
+function updateRow(row, { name, subtitle, detail, value, cost, max, color, stale, platform, local, client, kind, inputTokens, cacheReadTokens, outputTokens }) {
   const width = rowWidth(value, max);
   const isExpanded = row.classList.contains('expanded');
   row.className = `row${kind ? ` ${kind}-row` : ''}${stale ? ' stale' : ''}${local ? ' local' : ''}`;
   if (local) row.title = 'This device';
   
-  if (cacheReadTokens !== undefined || outputTokens !== undefined) {
+  if (inputTokens !== undefined || cacheReadTokens !== undefined || outputTokens !== undefined) {
+    if (inputTokens !== undefined) row.dataset.inputTokens = inputTokens || 0;
     row.dataset.cacheRead = cacheReadTokens || 0;
     row.dataset.outputTokens = outputTokens || 0;
     row.dataset.totalTokens = value || 0;
@@ -780,31 +783,14 @@ function updateRow(row, { name, subtitle, detail, value, cost, max, color, stale
   fill.style.width = `${width}%`;
 
   const accordionInner = row.querySelector('.row-accordion-inner');
-  if ((cacheReadTokens !== undefined || outputTokens !== undefined) && value > 0 && kind !== 'session') {
-    const cacheRead = cacheReadTokens || 0;
-    const output = outputTokens || 0;
-    const totalTokens = value || 0;
-    const cacheMiss = Math.max(0, totalTokens - cacheRead - output);
-    const inputTokens = cacheRead + cacheMiss;
-    const hitPct = inputTokens > 0 ? Math.round((cacheRead / inputTokens) * 100) : 0;
-    const missPct = inputTokens > 0 ? 100 - hitPct : 0;
-    
-    accordionInner.innerHTML = `
-      <div class="accordion-content">
-        <div class="accordion-row">
-          <div class="accordion-label">${t('dashboard.tooltip.inputCacheHit')} <span class="accordion-pct">${hitPct}%</span></div>
-          <div class="accordion-value">${formatNumber(cacheRead)}</div>
-        </div>
-        <div class="accordion-row">
-          <div class="accordion-label">${t('dashboard.tooltip.inputCacheMiss')} <span class="accordion-pct">${missPct}%</span></div>
-          <div class="accordion-value">${formatNumber(cacheMiss)}</div>
-        </div>
-        <div class="accordion-row">
-          <div class="accordion-label">${t('dashboard.tooltip.output')}</div>
-          <div class="accordion-value">${formatNumber(output)}</div>
-        </div>
-      </div>
-    `;
+  if ((inputTokens !== undefined || cacheReadTokens !== undefined || outputTokens !== undefined) && value > 0 && kind !== 'session') {
+    const breakdown = tokenBreakdownApi.computeTokenBreakdown({
+      totalTokens: value || 0,
+      inputTokens,
+      cacheReadTokens: cacheReadTokens || 0,
+      outputTokens: outputTokens || 0
+    });
+    accordionInner.innerHTML = tokenBreakdownApi.renderTokenAccordionHtml(breakdown, t);
     row.classList.add('has-accordion');
     if (isExpanded) row.classList.add('expanded');
   } else {
@@ -873,7 +859,7 @@ function deviceRowsForPeriod() {
 }
 
 function toolRowsForPeriod(period) {
-  const clientRows = Object.entries(period?.clients || {}).filter(([, value]) => Number(value) > 0).map(([client, value]) => ({ key: client, name: clientLabels[client] || client, value: Number(value), cost: Number(period?.clientCosts?.[client] || 0), color: clientColors[client] || clientColors.default, stale: false, cacheReadTokens: Number(period?.clientCacheReads?.[client] || 0), cacheWriteTokens: Number(period?.clientCacheWrites?.[client] || 0), outputTokens: Number(period?.clientOutputs?.[client] || 0) }));
+  const clientRows = Object.entries(period?.clients || {}).filter(([, value]) => Number(value) > 0).map(([client, value]) => ({ key: client, name: clientLabels[client] || client, value: Number(value), cost: Number(period?.clientCosts?.[client] || 0), color: clientColors[client] || clientColors.default, stale: false, inputTokens: period?.clientInputs?.[client], cacheReadTokens: Number(period?.clientCacheReads?.[client] || 0), cacheWriteTokens: Number(period?.clientCacheWrites?.[client] || 0), outputTokens: Number(period?.clientOutputs?.[client] || 0) }));
   if (clientRows.length > 0) {
     const usageSortedRows = clientRows.sort((a, b) => b.value - a.value);
     return clientDisplayPreferencesApi.applyClientDisplayPreferences(usageSortedRows, state.settings?.clientDisplayOrder, state.settings?.hiddenClients, KNOWN_CLIENTS, state.settings?.pinnedClients);
@@ -890,6 +876,7 @@ function modelRowsForPeriod(period) {
     cost: Number(period?.modelCosts?.[model] || 0),
     color: modelColor(model),
     stale: false,
+    inputTokens: period?.modelInputs?.[model],
     cacheReadTokens: Number(period?.modelCacheReads?.[model] || 0),
     cacheWriteTokens: Number(period?.modelCacheWrites?.[model] || 0),
     outputTokens: Number(period?.modelOutputs?.[model] || 0)

@@ -89,16 +89,19 @@ function emptyPeriod() {
   return {
     totalTokens: 0,
     costUsd: 0,
+    inputTokens: 0,
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
     outputTokens: 0,
     clients: {},
     clientCosts: {},
+    clientInputs: {},
     clientCacheReads: {},
     clientCacheWrites: {},
     clientOutputs: {},
     models: {},
     modelCosts: {},
+    modelInputs: {},
     modelCacheReads: {},
     modelCacheWrites: {},
     modelOutputs: {},
@@ -381,6 +384,7 @@ function normalizePeriod(input) {
   if (!input || typeof input !== 'object') return period;
   period.totalTokens = Math.max(0, Math.round(asNumber(input.totalTokens ?? input.total_tokens ?? 0)));
   period.costUsd = asNumber(input.costUsd ?? input.cost_usd ?? input.cost ?? 0);
+  period.inputTokens = Math.max(0, Math.round(asNumber(input.inputTokens ?? input.input_tokens ?? 0)));
   period.cacheReadTokens = Math.max(0, Math.round(asNumber(input.cacheReadTokens ?? input.cache_read_tokens ?? 0)));
   period.cacheWriteTokens = Math.max(0, Math.round(asNumber(input.cacheWriteTokens ?? input.cache_write_tokens ?? 0)));
   period.outputTokens = Math.max(0, Math.round(asNumber(input.outputTokens ?? input.output_tokens ?? 0)));
@@ -389,6 +393,7 @@ function normalizePeriod(input) {
       const key = normalizeClientName(client);
       if (key) {
         period.clients[key] = (period.clients[key] || 0) + Math.max(0, Math.round(asNumber(value)));
+        if (input.clientInputs?.[client]) period.clientInputs[key] = (period.clientInputs[key] || 0) + Math.max(0, Math.round(asNumber(input.clientInputs[client])));
         if (input.clientCacheReads?.[client]) period.clientCacheReads[key] = (period.clientCacheReads[key] || 0) + Math.max(0, Math.round(asNumber(input.clientCacheReads[client])));
         if (input.clientCacheWrites?.[client]) period.clientCacheWrites[key] = (period.clientCacheWrites[key] || 0) + Math.max(0, Math.round(asNumber(input.clientCacheWrites[client])));
         if (input.clientOutputs?.[client]) period.clientOutputs[key] = (period.clientOutputs[key] || 0) + Math.max(0, Math.round(asNumber(input.clientOutputs[client])));
@@ -406,6 +411,7 @@ function normalizePeriod(input) {
       const key = normalizeModelName(model);
       if (key) {
         period.models[key] = (period.models[key] || 0) + Math.max(0, Math.round(asNumber(value)));
+        if (input.modelInputs?.[model]) period.modelInputs[key] = (period.modelInputs[key] || 0) + Math.max(0, Math.round(asNumber(input.modelInputs[model])));
         if (input.modelCacheReads?.[model]) period.modelCacheReads[key] = (period.modelCacheReads[key] || 0) + Math.max(0, Math.round(asNumber(input.modelCacheReads[model])));
         if (input.modelCacheWrites?.[model]) period.modelCacheWrites[key] = (period.modelCacheWrites[key] || 0) + Math.max(0, Math.round(asNumber(input.modelCacheWrites[model])));
         if (input.modelOutputs?.[model]) period.modelOutputs[key] = (period.modelOutputs[key] || 0) + Math.max(0, Math.round(asNumber(input.modelOutputs[model])));
@@ -471,6 +477,7 @@ function extractUsageFromTokscale(json) {
   for (const row of rows) {
     const tokens = tokenValue(row);
     const cost = costValue(row);
+    const input = Math.max(0, Math.round(firstNumber(row, INPUT_TOKEN_KEYS)));
     const cacheRead = Math.max(0, Math.round(firstNumber(row, CACHE_READ_TOKEN_KEYS)));
     const cacheWrite = Math.max(0, Math.round(firstNumber(row, CACHE_WRITE_TOKEN_KEYS)));
     const output = Math.max(0, Math.round(firstNumber(row, OUTPUT_TOKEN_KEYS)));
@@ -479,11 +486,13 @@ function extractUsageFromTokscale(json) {
     if (client === 'cursor' && model === 'auto') model = 'cursor-auto';
     period.totalTokens += Math.max(0, Math.round(tokens));
     period.costUsd += cost;
+    period.inputTokens += input;
     period.cacheReadTokens += cacheRead;
     period.cacheWriteTokens += cacheWrite;
     period.outputTokens += output;
     if (client && tokens > 0) {
       period.clients[client] = (period.clients[client] || 0) + Math.round(tokens);
+      if (input > 0) period.clientInputs[client] = (period.clientInputs[client] || 0) + input;
       if (cacheRead > 0) period.clientCacheReads[client] = (period.clientCacheReads[client] || 0) + cacheRead;
       if (cacheWrite > 0) period.clientCacheWrites[client] = (period.clientCacheWrites[client] || 0) + cacheWrite;
       if (output > 0) period.clientOutputs[client] = (period.clientOutputs[client] || 0) + output;
@@ -491,6 +500,7 @@ function extractUsageFromTokscale(json) {
     if (client && cost > 0) period.clientCosts[client] = (period.clientCosts[client] || 0) + cost;
     if (model && tokens > 0) {
       period.models[model] = (period.models[model] || 0) + Math.round(tokens);
+      if (input > 0) period.modelInputs[model] = (period.modelInputs[model] || 0) + input;
       if (cacheRead > 0) period.modelCacheReads[model] = (period.modelCacheReads[model] || 0) + cacheRead;
       if (cacheWrite > 0) period.modelCacheWrites[model] = (period.modelCacheWrites[model] || 0) + cacheWrite;
       if (output > 0) period.modelOutputs[model] = (period.modelOutputs[model] || 0) + output;
@@ -685,11 +695,13 @@ function aggregateHistory(devices, staleAfterMs, nowMs = Date.now()) {
 function addPeriodInto(target, source) {
   target.totalTokens += source.totalTokens;
   target.costUsd += source.costUsd;
+  target.inputTokens += source.inputTokens;
   target.cacheReadTokens += source.cacheReadTokens;
   target.cacheWriteTokens += source.cacheWriteTokens;
   target.outputTokens += source.outputTokens;
   for (const [client, tokens] of Object.entries(source.clients)) {
     target.clients[client] = (target.clients[client] || 0) + tokens;
+    if (source.clientInputs?.[client]) target.clientInputs[client] = (target.clientInputs[client] || 0) + source.clientInputs[client];
     if (source.clientCacheReads?.[client]) target.clientCacheReads[client] = (target.clientCacheReads[client] || 0) + source.clientCacheReads[client];
     if (source.clientCacheWrites?.[client]) target.clientCacheWrites[client] = (target.clientCacheWrites[client] || 0) + source.clientCacheWrites[client];
     if (source.clientOutputs?.[client]) target.clientOutputs[client] = (target.clientOutputs[client] || 0) + source.clientOutputs[client];
@@ -697,6 +709,7 @@ function addPeriodInto(target, source) {
   for (const [client, cost] of Object.entries(source.clientCosts)) target.clientCosts[client] = (target.clientCosts[client] || 0) + cost;
   for (const [model, tokens] of Object.entries(source.models)) {
     target.models[model] = (target.models[model] || 0) + tokens;
+    if (source.modelInputs?.[model]) target.modelInputs[model] = (target.modelInputs[model] || 0) + source.modelInputs[model];
     if (source.modelCacheReads?.[model]) target.modelCacheReads[model] = (target.modelCacheReads[model] || 0) + source.modelCacheReads[model];
     if (source.modelCacheWrites?.[model]) target.modelCacheWrites[model] = (target.modelCacheWrites[model] || 0) + source.modelCacheWrites[model];
     if (source.modelOutputs?.[model]) target.modelOutputs[model] = (target.modelOutputs[model] || 0) + source.modelOutputs[model];

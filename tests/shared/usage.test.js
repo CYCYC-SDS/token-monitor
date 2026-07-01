@@ -358,6 +358,40 @@ test('extractUsageFromTokscale normalizes Kimi, Qwen, and Grok Build client name
   assert.equal(period.clients.grok, 19);
 });
 
+test('extractUsageFromTokscale tracks Grok input-only rows at period, client, and model levels', () => {
+  const period = extractUsageFromTokscale({
+    groupBy: 'client,model',
+    entries: [
+      {
+        client: 'grok',
+        model: 'grok-composer-2.5-fast',
+        input: 3_649_529,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        cost: 5.47
+      },
+      {
+        client: 'grok',
+        model: 'grok-build',
+        input: 298_223,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        cost: 0.29
+      }
+    ]
+  });
+
+  assert.equal(period.totalTokens, 3_947_752);
+  assert.equal(period.inputTokens, 3_947_752);
+  assert.equal(period.outputTokens, 0);
+  assert.equal(period.clients.grok, 3_947_752);
+  assert.equal(period.clientInputs.grok, 3_947_752);
+  assert.equal(period.modelInputs['grok-composer-2.5-fast'], 3_649_529);
+  assert.equal(period.modelInputs['grok-build'], 298_223);
+});
+
 test('extractUsageFromTokscale normalizes GitHub Copilot client names', () => {
   const period = extractUsageFromTokscale([
     { client: 'GitHub Copilot', model: 'gpt-4.1', totalTokens: 21 },
