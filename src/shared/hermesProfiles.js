@@ -1,10 +1,11 @@
 'use strict';
 
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
 function resolveHermesHome({ env = process.env, homeDir, platform = process.platform, existsSync = fs.existsSync } = {}) {
-  const home = homeDir || require('node:os').homedir();
+  const home = homeDir || os.homedir();
   const fromEnv = String(env.HERMES_HOME || '').trim();
   if (fromEnv) return fromEnv;
 
@@ -12,10 +13,11 @@ function resolveHermesHome({ env = process.env, homeDir, platform = process.plat
   if (existsSync(path.join(dotHermes, 'state.db'))) return dotHermes;
 
   // Windows native installs often land in %LOCALAPPDATA%\hermes instead of
-  // ~/.hermes. Resolve via the active home dir so mocked homedirs in tests do
-  // not leak the developer machine's real AppData path.
+  // ~/.hermes. Prefer the real LOCALAPPDATA, falling back to the active home
+  // dir so mocked homedirs in tests do not leak the developer machine's AppData.
   if (platform === 'win32') {
-    const winNative = path.join(home, 'AppData', 'Local', 'hermes');
+    const localAppData = env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+    const winNative = path.join(localAppData, 'hermes');
     if (existsSync(path.join(winNative, 'state.db'))) return winNative;
   }
 
@@ -84,6 +86,10 @@ function tokscaleEnvWithHermesProfiles(env, clientsCsv, opts = {}) {
 
 function tokscaleEnvFromSpawnArgs(env, userArgs, opts = {}) {
   const args = Array.isArray(userArgs) ? userArgs : [];
+  // A `--home` scan (WSL) disables tokscale's env roots, so it ignores
+  // TOKSCALE_EXTRA_DIRS entirely — injecting host profile dirs there is dead
+  // work and would point at host paths that don't exist under that home.
+  if (args.includes('--home')) return env;
   const clientIndex = args.indexOf('--client');
   if (clientIndex < 0 || clientIndex >= args.length - 1) return env;
   return tokscaleEnvWithHermesProfiles(env, args[clientIndex + 1], opts);

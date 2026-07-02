@@ -640,10 +640,15 @@ const HERMES_DB_FILES = new Set(['state.db', 'state.db-wal', 'state.db-shm']);
 function watchIgnoreMatcher(clientsCsv) {
   const roots = (clientWatchCandidates(clientsCsv).hermes || []).map((dir) => path.resolve(dir));
   if (roots.length === 0) return undefined;
+  const rootSet = new Set(roots);
   return (target) => {
     const resolved = path.resolve(target);
+    // Every explicit watch root stays watched — the home dir AND each profile
+    // dir. A profile dir lives under the home root, so the child-prune below
+    // would otherwise ignore it (basename isn't a db file) before we recognise
+    // it as a watch root in its own right, silencing profile-db change events.
+    if (rootSet.has(resolved)) return false;
     for (const root of roots) {
-      if (resolved === root) return false; // the watch root itself must stay watched
       if (resolved.startsWith(root + path.sep)) return !HERMES_DB_FILES.has(path.basename(resolved));
     }
     return false; // non-Hermes paths are never ignored

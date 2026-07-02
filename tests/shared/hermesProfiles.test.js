@@ -125,6 +125,24 @@ test('tokscaleEnvFromSpawnArgs reads --client from tokscale argv', () => {
   assert.equal(env.TOKSCALE_EXTRA_DIRS, `hermes:${profileDir}`);
 });
 
+test('tokscaleEnvFromSpawnArgs skips injection for --home scans (tokscale ignores extra dirs there)', () => {
+  const base = { FOO: 'bar' };
+  const env = tokscaleEnvFromSpawnArgs(
+    base,
+    ['--json', '--client', 'hermes', '--group-by', 'client,model', '--home', '\\\\wsl$\\Ubuntu\\home\\u'],
+    {
+      env: { HERMES_HOME: path.join('/home/u', '.hermes') },
+      homeDir: '/home/u',
+      platform: 'linux',
+      existsSync: () => true,
+      readdirSync: () => [{ name: 'research', isDirectory: () => true }]
+    }
+  );
+
+  assert.equal(env, base);
+  assert.equal(env.TOKSCALE_EXTRA_DIRS, undefined);
+});
+
 test('mergeTokscaleExtraDirs appends without duplicating the env object fields', () => {
   const env = mergeTokscaleExtraDirs({ A: '1' }, ['hermes:/tmp/p1', 'hermes:/tmp/p2']);
   assert.equal(env.A, '1');

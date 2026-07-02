@@ -255,6 +255,40 @@ test('watchIgnoreMatcher prunes the Hermes runtime but keeps the state.db family
   }
 });
 
+test('watchIgnoreMatcher keeps profile dirs and their db family so profile changes still fire', () => {
+  // A profile dir lives under the Hermes home root, so the child-prune must not
+  // ignore it just because its basename isn't a db file — chokidar would then
+  // refuse to watch the explicit profile watch root and profile-db edits would
+  // only surface on the next interval scan, not the promised 3-5 s refresh.
+  const tmp = withTmpHome([path.join('.hermes', 'hermes-agent', 'node_modules')]);
+  const hermesRoot = path.join(tmp, '.hermes');
+  fs.writeFileSync(path.join(hermesRoot, 'state.db'), '');
+  const profileDir = path.join(hermesRoot, 'profiles', 'research');
+  fs.mkdirSync(profileDir, { recursive: true });
+  fs.writeFileSync(path.join(profileDir, 'state.db'), '');
+  const originalHomedir = os.homedir;
+  const previousHermesHome = process.env.HERMES_HOME;
+  os.homedir = () => tmp;
+  try {
+    delete process.env.HERMES_HOME;
+    const { watchIgnoreMatcher } = freshCollector();
+    const ignored = watchIgnoreMatcher('hermes');
+    // The profile dir (an explicit watch root) and its db family stay watched.
+    assert.equal(ignored(profileDir), false);
+    assert.equal(ignored(path.join(profileDir, 'state.db')), false);
+    assert.equal(ignored(path.join(profileDir, 'state.db-wal')), false);
+    assert.equal(ignored(path.join(profileDir, 'state.db-shm')), false);
+    // Junk inside a profile dir is still pruned.
+    assert.equal(ignored(path.join(profileDir, 'logs')), true);
+  } finally {
+    os.homedir = originalHomedir;
+    if (previousHermesHome === undefined) delete process.env.HERMES_HOME;
+    else process.env.HERMES_HOME = previousHermesHome;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('watchIgnoreMatcher honors HERMES_HOME and is absent when Hermes is not tracked', () => {
   const tmp = withTmpHome([]);
   const hermesHome = path.join(tmp, 'custom-hermes');
